@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="theme-color" content="#121214">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Slip">
+<title>Slip – daily word slide puzzle</title>
+<style>
+:root{--bg:#121214;--fg:#f2f2f2;--tile:#34343c;--edge:#5a5a66;--ok:#2f7d42;--okedge:#69c27a;--no:#4a3236;--noedge:#a35c63;--accent:#4a6fa5;--cell:min(14.5vw,64px)}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh}
+header{width:100%;max-width:480px;display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #333}
+h1{font-size:22px;margin:0;letter-spacing:1px}
+main{width:100%;max-width:480px;padding:10px 14px 30px}
+.btn{background:#2b2b30;color:var(--fg);border:0;border-radius:8px;padding:10px 14px;font-weight:600;font-size:15px;cursor:pointer}
+.btn:disabled{opacity:.4;cursor:default}
+.btn.primary{background:var(--accent)}
+#msg{min-height:24px;text-align:center;font-weight:600;margin:6px 0}
+.help{max-width:400px;margin:6px auto 10px;text-align:center;color:#d4d4da;line-height:1.4}
+.board{display:grid;grid-template-columns:repeat(6,var(--cell));grid-auto-rows:var(--cell);gap:5px;justify-content:center;margin:10px auto;touch-action:none;user-select:none}
+.arrow{background:transparent;color:#8d8d99;border:0;font-size:20px;cursor:pointer;border-radius:8px}
+.arrow:active{background:#2b2b30;color:#fff}
+.tile{background:var(--tile);border:2px solid var(--edge);border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:calc(var(--cell) * .46);cursor:grab}
+.tile.ok{background:var(--ok);border-color:var(--okedge)}
+.tile.no{background:var(--no);border-color:var(--noedge)}
+.tile.done{background:var(--ok);border-color:var(--okedge)}
+.stats{display:flex;gap:18px;justify-content:center;margin:6px 0 2px;color:#d4d4da}
+.stats b{color:#fff;font-size:18px}
+.actions{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px}
+dialog{background:#222;color:#fff;border:1px solid #555;border-radius:12px;max-width:340px}
+pre{white-space:pre-wrap}
+.words{text-align:center;font-weight:700;letter-spacing:2px;margin:8px 0;color:#bfe3c6}
+</style></head><body>
+<header><h1>SLIP</h1><button class="btn" id="statsBtn">Stats</button></header>
+<main>
+  <p class="help" id="help"><b>How to play:</b> slide rows and columns until the four rows spell four hidden words, in any order. Tap an arrow or swipe a tile. Letters that slide off one edge come back on the other. Nothing is marked until you press Check.</p>
+  <div class="stats"><div>Moves <b id="moves">0</b></div><div>Par <b id="par">0</b></div><div>Checks left <b id="checks">3</b></div></div>
+  <div id="msg"></div>
+  <div class="board" id="board"></div>
+  <div class="words" id="words"></div>
+  <div class="actions">
+    <button class="btn" id="undo">Undo</button>
+    <button class="btn" id="reset">Reset</button>
+    <button class="btn primary" id="check">Check</button>
+    <button class="btn" id="giveup">Give up</button>
+  </div>
+</main>
+<dialog id="dlg"><div id="dlgBody"></div><div class="actions"><button class="btn" id="share">Share</button><button class="btn" id="close">Close</button></div></dialog>
+<script src="core.js"></script><script src="data.js"></script>
+<script>
+const $ = s => document.querySelector(s);
+const SITE_URL = location.origin && location.origin !== 'null' ? location.origin + location.pathname : '';
+const MAX_CHECKS = 3;
+const store = {
+  get(k, d) { try { return JSON.parse(localStorage.getItem('slip:' + k)) ?? d; } catch (e) { return d; } },
+  set(k, v) { localStorage.setItem('slip:' + k, JSON.stringify(v)); }
+};
+const today = Core.dateKey(), idx = Core.dayIndex();
+const puzzle = Core.pick(Data.PUZZLES, idx);
+let S, shareTextValue = '';
+
+function freshState() {
+  return { date: today, id: puzzle.id, grid: puzzle.start, moves: [], checks: 0, feedback: null, over: false, won: false };
+}
+function load() {
+  const saved = store.get('state', null);
+  const valid = saved && saved.date === today && saved.id === puzzle.id && typeof saved.grid === 'string' && saved.grid.length === 16 &&
+    saved.grid.split('').sort().join('') === puzzle.start.split('').sort().join('') && Array.isArray(saved.moves);
+  S = valid ? saved : freshState();
+  if (!Array.isArray(S.feedback)) S.feedback = null;
+}
+const say = t => { $('#msg').textContent = t; if (t) setTimeout(() => { if ($('#msg').textContent === t) $('#msg').textContent = ''; }, 2400); };
+const save = () => store.set('state', S);
+
+function render() {
+  const rows = Core.rows(S.grid);
+  let h = '';
+  h += '<div></div>' + [0, 1, 2, 3].map(c => `<button class="arrow" data-m="c${c}-" aria-label="Slide column ${c + 1} up">▲</button>`).join('') + '<div></div>';
+  rows.forEach((row, r) => {
+    const state = S.won ? 'done' : S.feedback ? (S.feedback[r] ? 'ok' : 'no') : '';
+    h += `<button class="arrow" data-m="r${r}-" aria-label="Slide row ${r + 1} left">◀</button>`;
+    h += row.split('').map((ch, c) => `<div class="tile ${state}" data-r="${r}" data-c="${c}">${ch}</div>`).join('');
+    h += `<button class="arrow" data-m="r${r}+" aria-label="Slide row ${r + 1} right">▶</button>`;
+  });
+  h += '<div></div>' + [0, 1, 2, 3].map(c => `<button class="arrow" data-m="c${c}+" aria-label="Slide column ${c + 1} down">▼</button>`).join('') + '<div></div>';
+  $('#board').innerHTML = h;
+  $('#moves').textContent = S.moves.length;
+  $('#par').textContent = puzzle.par;
+  $('#checks').textContent = MAX_CHECKS - S.checks;
+  $('#words').textContent = S.over ? puzzle.words.join('  ·  ') : '';
+  $('#undo').disabled = S.over || !S.moves.length;
+  $('#reset').disabled = S.over || !S.moves.length;
+  $('#check').disabled = S.over || S.checks >= MAX_CHECKS;
+  $('#giveup').disabled = S.over;
+  document.querySelectorAll('.arrow[data-m]').forEach(b => b.onclick = () => doMove(b.dataset.m));
+}
+
+function doMove(m) {
+  if (S.over) return;
+  S.grid = Core.applyMove(S.grid, m);
+  S.moves.push(m);
+  S.feedback = null;
+  if (Core.isSolved(S.grid, puzzle.words, puzzle.alts)) finish(true);
+  save(); render();
+  if (S.over) showStats();
+}
+function undo() {
+  if (S.over || !S.moves.length) return;
+  S.grid = Core.applyMove(S.grid, Core.invert(S.moves.pop()));
+  S.feedback = null; save(); render();
+}
+function reset() {
+  if (S.over) return;
+  S.grid = puzzle.start; S.moves = []; S.feedback = null; save(); render();
+}
+function check() {
+  if (S.over || S.checks >= MAX_CHECKS) return;
+  S.checks++;
+  S.feedback = Core.rowMatches(S.grid, puzzle.words, puzzle.alts);
+  const n = S.feedback.filter(Boolean).length;
+  say(n + ' of 4 rows spell a hidden word');
+  save(); render();
+}
+function giveUp() {
+  if (S.over) return;
+  finish(false); save(); render(); showStats();
+}
+function finish(won) {
+  S.over = true; S.won = won;
+  store.set('stats', Core.updateStats(store.get('stats', null), won, today));
+}
+function showStats() {
+  const s = Object.assign({ played: 0, wins: 0, streak: 0, best: 0 }, store.get('stats', {}));
+  let body = `<h3>Slip stats</h3><p>Played ${s.played} · Won ${s.wins} · Streak ${s.streak} · Best ${s.best}</p>`;
+  shareTextValue = '';
+  if (S.over) {
+    shareTextValue = Core.shareText(today, S.moves.length, puzzle.par, S.won, SITE_URL);
+    body += '<pre id="sh"></pre>';
+  }
+  $('#dlgBody').innerHTML = body;
+  if (S.over) $('#sh').textContent = shareTextValue;
+  $('#share').style.display = shareTextValue ? '' : 'none';
+  $('#dlg').showModal();
+}
+
+// Swipe a tile: a mostly horizontal swipe slides its row, a mostly vertical swipe slides its column.
+function swipe(r, c, dx, dy) {
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < 18) return false;
+  if (Math.abs(dx) >= Math.abs(dy)) doMove('r' + r + (dx > 0 ? '+' : '-'));
+  else doMove('c' + c + (dy > 0 ? '+' : '-'));
+  return true;
+}
+let drag = null;
+$('#board').addEventListener('pointerdown', e => {
+  const t = e.target.closest('.tile'); if (!t) return;
+  drag = { r: +t.dataset.r, c: +t.dataset.c, x: e.clientX, y: e.clientY };
+});
+$('#board').addEventListener('pointerup', e => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  swipe(d.r, d.c, e.clientX - d.x, e.clientY - d.y);
+});
+$('#board').addEventListener('pointercancel', () => { drag = null; });
+
+$('#undo').onclick = undo; $('#reset').onclick = reset; $('#check').onclick = check; $('#giveup').onclick = giveUp;
+$('#statsBtn').onclick = showStats; $('#close').onclick = () => $('#dlg').close();
+$('#share').onclick = async () => {
+  try { navigator.share ? await navigator.share({ text: shareTextValue }) : await navigator.clipboard.writeText(shareTextValue); say('Shared'); } catch (e) {}
+};
+document.addEventListener('keydown', e => { if (e.key === 'z' && (e.ctrlKey || e.metaKey)) undo(); });
+
+load(); render();
+if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+</script></body></html>
