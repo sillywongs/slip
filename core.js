@@ -62,31 +62,79 @@
   }
   const invert = m => m[0] + m[1] + (m[2] === '+' ? '-' : '+');
   const applyAll = (state, moves) => moves.reduce(applyMove, state);
+  const describeMove = m => m[0] === 'r'
+    ? 'row ' + (+m[1] + 1) + ' ' + (m[2] === '+' ? 'right' : 'left')
+    : 'column ' + (+m[1] + 1) + ' ' + (m[2] === '+' ? 'down' : 'up');
+  // Every grid along a list of moves: the start, then the grid after each move.
+  function pathStates(start, moves) {
+    const out = [start];
+    moves.forEach(m => out.push(applyMove(out[out.length - 1], m)));
+    return out;
+  }
+
+  // ---- locked rows (easy mode) ----
+  // A locked row never moves. Its row arrows do nothing, and a column slide cycles only the unlocked rows.
+  // At most MAX_LOCKS rows can lock. With two or more free rows every arrangement of the free letters can
+  // still be reached, so the puzzle stays solvable. With one free row only its four rotations would exist.
+  const MAX_LOCKS = 2;
+  const freeRows = locks => [0, 1, 2, 3].filter(r => !(locks || []).includes(r));
+  const validMoves = locks => ALL_MOVES.filter(m => m[0] === 'c' ? freeRows(locks).length >= 2 : !(locks || []).includes(+m[1]));
+  function applyMoveLocked(state, m, locks) {
+    const L = locks || [];
+    if (!L.length) return applyMove(state, m);
+    const i = +m[1];
+    if (m[0] === 'r') return L.includes(i) ? state : applyMove(state, m);
+    const U = freeRows(L);
+    if (U.length < 2) return state;
+    const col = U.map(r => state[r * 4 + i]);
+    const n = m[2] === '+' ? [col[col.length - 1]].concat(col.slice(0, -1)) : col.slice(1).concat(col[0]);
+    const a = state.split('');
+    U.forEach((r, k) => { a[r * 4 + i] = n[k]; });
+    return a.join('');
+  }
 
   // ---- winning ----
   // 'alts' maps a target word to other spellings of the same letters that also count (BEAR -> BARE).
   // Without it, a player who builds a real word we did not list would be marked wrong.
   const spellings = (word, alts) => [word].concat((alts && alts[word]) || []);
-  function rowMatches(state, words, alts) {
+  // For each row, the target word it spells (each target used once), or null.
+  function matchedWords(state, words, alts) {
     const left = words.slice();
     return rows(state).map(r => {
       const i = left.findIndex(w => spellings(w, alts).includes(r));
-      if (i < 0) return false;
-      left.splice(i, 1);
-      return true;
+      return i < 0 ? null : left.splice(i, 1)[0];
     });
   }
+  const rowMatches = (state, words, alts) => matchedWords(state, words, alts).map(Boolean);
   const isSolved = (state, words, alts) => rowMatches(state, words, alts).every(Boolean);
+  // The rows that would lock after a Check: correct rows that are not locked yet, up to the cap.
+  function lockableRows(state, words, alts, locks) {
+    const L = locks || [], m = rowMatches(state, words, alts), out = [];
+    for (let r = 0; r < 4; r++) if (m[r] && !L.includes(r) && L.length + out.length < MAX_LOCKS) out.push(r);
+    return out;
+  }
 
-  // ---- solving (used by the puzzle maker and the tests) ----
+  // ---- solving (puzzle maker, tests, hints and the shortest-path replay) ----
   function permutations(a) {
     return a.length < 2 ? [a] : a.flatMap((x, i) => permutations(a.slice(0, i).concat(a.slice(i + 1))).map(p => [x, ...p]));
   }
-  // Shortest list of moves that solves the grid. Searches from both ends at once.
-  function minMoves(start, words, limit, alts) {
+  // Shortest list of moves that solves the grid, respecting any locked rows. Searches from both ends at once.
+  function minMoves(start, words, limit, alts, locks) {
     limit = limit || 10;
-    const variants = words.reduce((acc, w) => acc.flatMap(a => spellings(w, alts).map(s => a.concat(s))), [[]]);
-    const goals = Array.from(new Set(variants.flatMap(v => permutations(v).map(p => p.join('')))));
+    const L = locks || [], free = freeRows(L), moves = validMoves(L);
+    const apply = (s, m) => applyMoveLocked(s, m, L);
+    const matched = matchedWords(start, words, alts), remaining = words.slice();
+    for (const r of L) {
+      if (!matched[r]) return null;
+      remaining.splice(remaining.indexOf(matched[r]), 1);
+    }
+    const startRows = rows(start);
+    const variants = remaining.reduce((acc, w) => acc.flatMap(a => spellings(w, alts).map(s => a.concat(s))), [[]]);
+    const goals = Array.from(new Set(variants.flatMap(v => permutations(v).map(p => {
+      const out = startRows.slice();
+      free.forEach((r, k) => { out[r] = p[k]; });
+      return out.join('');
+    }))));
     if (goals.includes(start)) return [];
     const A = new Map([[start, { d: 0 }]]);
     const B = new Map(goals.map(g => [g, { d: 0 }]));
@@ -103,8 +151,8 @@
       let best = null;
       const next = [];
       if (fa.length <= fb.length) {
-        for (const s of fa) for (const m of ALL_MOVES) {
-          const t = applyMove(s, m);
+        for (const s of fa) for (const m of moves) {
+          const t = apply(s, m);
           if (A.has(t)) continue;
           A.set(t, { from: s, move: m, d: A.get(s).d + 1 });
           next.push(t);
@@ -112,8 +160,8 @@
         }
         fa = next;
       } else {
-        for (const s of fb) for (const m of ALL_MOVES) {
-          const t = applyMove(s, m);
+        for (const s of fb) for (const m of moves) {
+          const t = apply(s, m);
           if (B.has(t)) continue;
           B.set(t, { to: s, move: invert(m), d: B.get(s).d + 1 });
           next.push(t);
@@ -125,6 +173,11 @@
       if (best) return build(best.t);
     }
     return null;
+  }
+  // The first move of a shortest solution from this grid, or null if the grid is solved or too far away.
+  function hintMove(state, words, alts, limit, locks) {
+    const sol = minMoves(state, words, limit || 10, alts, locks);
+    return sol && sol.length ? sol[0] : null;
   }
 
   // Start from the solved grid and slide it about. Every slide can be undone, so the result is always solvable.
@@ -151,12 +204,13 @@
     s.last = key; s.lastWon = won;
     return s;
   }
-  function shareText(key, moves, par, won, url) {
+  function shareText(key, moves, par, won, url, hints, easy) {
     const bar = Array.from({ length: moves }, (_, i) => (i < par ? '🟦' : '🟧')).join('');
-    const head = 'Slip ' + key + (won ? ' ' + moves + ' moves (par ' + par + ')' : ' gave up');
+    const head = 'Slip ' + key + (won ? ' ' + moves + ' moves (par ' + par + ')' : ' did not solve it') + (hints ? ' 💡' + hints : '') + (easy ? ' 🔒easy' : '');
     return head + '\n' + (won ? bar + '\n' : '') + (url || '');
   }
 
-  return { ALL_MOVES, dateKey, dayIndex, prevKey, mulberry32, shuffle, pick, rows, slideRow, slideCol, applyMove, applyAll,
-    invert, isSolved, rowMatches, permutations, minMoves, scramble, updateStats, shareText };
+  return { ALL_MOVES, MAX_LOCKS, dateKey, dayIndex, prevKey, mulberry32, shuffle, pick, rows, slideRow, slideCol, applyMove, applyAll,
+    invert, describeMove, pathStates, freeRows, validMoves, applyMoveLocked, matchedWords, isSolved, rowMatches, lockableRows,
+    permutations, minMoves, hintMove, scramble, updateStats, shareText };
 });

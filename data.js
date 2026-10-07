@@ -24,11 +24,10 @@
           "LOIN"
         ]
       },
-      "start": "BDEDLEORLIAAROAN",
-      "par": 5,
+      "start": "BDENLEODLIARROAA",
+      "par": 4,
       "solution": [
         "c0-",
-        "c3+",
         "c3+",
         "r0-",
         "c1-"
@@ -55,13 +54,12 @@
           "ODOR"
         ]
       },
-      "start": "LONMEAIWSTORDNOP",
-      "par": 4,
+      "start": "LONPEAIMSTOWDNOR",
+      "par": 3,
       "solution": [
         "c1-",
-        "c3+",
-        "r1-",
-        "r0+"
+        "r0+",
+        "r1-"
       ]
     },
     {
@@ -77,16 +75,15 @@
           "KALE"
         ]
       },
-      "start": "NDSWDLINAKEIANRA",
-      "par": 7,
+      "start": "NDSWLINDAKEIANRA",
+      "par": 6,
       "solution": [
         "r0+",
-        "r1-",
         "r2+",
         "c0+",
+        "r0+",
         "r3-",
-        "r3-",
-        "r0+"
+        "r3-"
       ]
     },
     {
@@ -108,14 +105,16 @@
           "TSAR"
         ]
       },
-      "start": "ARMIKFILBORESTAT",
-      "par": 5,
+      "start": "ATMILRFIBKRESOAT",
+      "par": 7,
       "solution": [
+        "c1-",
         "r0+",
         "r0+",
-        "r1-",
-        "c0+",
-        "c1+"
+        "r1+",
+        "r1+",
+        "c1+",
+        "c0+"
       ]
     },
     {
@@ -139,13 +138,13 @@
           "MALE"
         ]
       },
-      "start": "CKABSOKTMAOLAELE",
+      "start": "LOEABKCOSAKEMALT",
       "par": 4,
       "solution": [
+        "r0-",
         "c0+",
-        "c2-",
-        "r0+",
-        "c3+"
+        "r1-",
+        "r1-"
       ]
     },
     {
@@ -157,11 +156,9 @@
         "DESK"
       ],
       "alts": {},
-      "start": "EAOLOWHSFEOKRLMD",
-      "par": 7,
+      "start": "EAOLWHSOEOKFRLMD",
+      "par": 5,
       "solution": [
-        "r1-",
-        "r2-",
         "c0-",
         "c2+",
         "r3+",
@@ -183,13 +180,14 @@
           "CARE"
         ]
       },
-      "start": "MSAEKWUCPICKRJIM",
-      "par": 5,
+      "start": "MWAEKIUCPJCKRSIM",
+      "par": 6,
       "solution": [
+        "c1+",
         "c3-",
         "r0-",
-        "c2+",
         "c1-",
+        "c2+",
         "r2-"
       ]
     },
@@ -206,14 +204,15 @@
           "ICON"
         ]
       },
-      "start": "AOIBCONDGKIHCNRL",
-      "par": 6,
+      "start": "AOIBCONDGKIHLCNR",
+      "par": 7,
       "solution": [
+        "r3-",
         "c1+",
         "r3-",
         "c2-",
-        "r0+",
         "r3-",
+        "r0+",
         "c3+"
       ]
     },
@@ -230,16 +229,13 @@
           "FLEA"
         ]
       },
-      "start": "DSATETEOLEOERREF",
-      "par": 7,
+      "start": "SEODETOELEEFRRAT",
+      "par": 4,
       "solution": [
-        "c0+",
-        "c1+",
         "r1-",
-        "r2-",
-        "c3+",
+        "c0+",
         "c1-",
-        "c0+"
+        "c3+"
       ]
     },
     {
@@ -338,12 +334,11 @@
           "DEAR"
         ]
       },
-      "start": "KBATREEEALGOPAOD",
-      "par": 5,
+      "start": "KBADREETALGEPAOO",
+      "par": 4,
       "solution": [
         "c0-",
         "c1-",
-        "c3+",
         "r1+",
         "r3-"
       ]
@@ -361,14 +356,13 @@
           "HATE"
         ]
       },
-      "start": "LAHOCERCWOAMODLT",
-      "par": 6,
+      "start": "LDHOCARCWEAMOOLT",
+      "par": 5,
       "solution": [
-        "c1+",
         "r0+",
         "c3-",
-        "r0+",
         "r3+",
+        "r0+",
         "c0-"
       ]
     }
