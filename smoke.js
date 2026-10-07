@@ -2,334 +2,327 @@
 const vm = require('vm'), fs = require('fs'), assert = require('assert');
 const html = fs.readFileSync('index.html', 'utf8');
 const ui = html.match(/<script>([\s\S]*?)<\/script>/)[1];
-function classList() { const s = new Set(); return { add: c => s.add(c), remove: c => s.delete(c), has: c => s.has(c), toString: () => [...s].join(' ') }; }
+const same = (a, b, msg) => assert.strictEqual(JSON.stringify(a), JSON.stringify(b), msg);
+
+class FakeEl {
+  constructor(env, tag) {
+    this.env = env; this.tag = tag; this.children = []; this.parent = null; this.dataset = {}; this.attrs = {}; this.listeners = {};
+    this._cls = new Set(); this.textContent = ''; this.disabled = false; this.checked = false; this.onclick = null; this.innerHTML = '';
+    this.offsetLeft = 0; this.offsetTop = 0; this.offsetWidth = 56; this.offsetHeight = 56;
+    const self = this;
+    this.style = new Proxy({}, { set(o, k, v) { if (k === 'transform' && /arrow|lockbtn/.test(self.className)) env.violations.push(self.className + ' transform'); o[k] = v; return true; } });
+    this.classList = { add: c => { this._cls.add(c); }, remove: c => { this._cls.delete(c); }, contains: c => this._cls.has(c),
+      toggle: c => { this._cls.has(c) ? this._cls.delete(c) : this._cls.add(c); } };
+  }
+  get className() { return [...this._cls].join(' '); }
+  set className(v) { this._cls = new Set(String(v).split(/\s+/).filter(Boolean)); }
+  appendChild(c) { this.children.push(c); c.parent = this; return c; }
+  remove() { if (this.parent) { this.parent.children = this.parent.children.filter(x => x !== this); this.parent = null; } }
+  setAttribute(k, v) { this.attrs[k] = v; }
+  addEventListener(t, f) { (this.listeners[t] = this.listeners[t] || []).push(f); }
+  closest(sel) { const cls = sel.replace('.', ''); let e = this; while (e) { if (e.classList.contains(cls)) return e; e = e.parent; } return null; }
+  showModal() { this.open = true; } close() { this.open = false; }
+  animate(kf, opts) {
+    if (/arrow|lockbtn/.test(this.className)) this.env.violations.push(this.className + ' animated');
+    const rec = { el: this, kf, opts }; this.env.animations.push(rec);
+    return { finished: new Promise(res => { rec.resolve = res; }), cancel() {} };
+  }
+}
+
 function boot(saved) {
-  const els = {}, mem = Object.assign({}, saved || {}), listeners = {}, lines = {}, timers = [];
-  const el = s => els[s] || (els[s] = { innerHTML: '', textContent: '', style: {}, disabled: false, checked: false, classList: classList(), showModal() {}, close() {},
-    addEventListener(t, f) { (listeners[s + ':' + t] = listeners[s + ':' + t] || []).push(f); } });
-  const board = el('#board');
-  board.querySelector = () => ({ getBoundingClientRect: () => ({ width: 55 }) });
-  board.querySelectorAll = sel => {
-    if (lines[sel]) return lines[sel];
-    const m = sel.match(/data-(r|c)="(\d)"/), k = +m[2];
-    return (lines[sel] = [0, 1, 2, 3].map(i => ({ style: {}, classList: classList(), dataset: m[1] === 'r' ? { r: String(k), c: String(i) } : { r: String(i), c: String(k) } })));
-  };
+  const env = { violations: [], animations: [] }, els = {}, mem = Object.assign({}, saved || {}), timers = [];
+  const get = s => els[s] || (els[s] = new FakeEl(env, 'div'));
   const ctx = {
-    document: { querySelector: s => /^\.arrow/.test(s) ? (ctx.hintArrows[s] = ctx.hintArrows[s] || { classList: classList() }) : el(s),
-      querySelectorAll: sel => {
-        if (sel !== '.arrow[data-m]') return [];
-        return [...board.innerHTML.matchAll(/data-m="([^"]+)"/g)].map(m => { const b = { dataset: { m: m[1] } }; ctx.arrows[m[1]] = b; return b; });
-      }, addEventListener() {} },
-    arrows: {}, hintArrows: {}, localStorage: { getItem: k => mem[k] ?? null, setItem: (k, v) => mem[k] = v },
+    document: { querySelector: get, createElement: tag => new FakeEl(env, tag), addEventListener() {} },
+    localStorage: { getItem: k => mem[k] ?? null, setItem: (k, v) => mem[k] = v },
     location: { origin: 'https://example.com', pathname: '/slip/' }, navigator: {}, addEventListener() {},
-    setTimeout: (f, ms) => { timers.push({ f, ms }); return timers.length; }, clearTimeout(id) { if (timers[id - 1]) timers[id - 1].f = null; }, console,
-    Core: require('./core.js'), Data: require('./data.js')
+    setTimeout: (f, ms) => { timers.push({ f, ms }); return timers.length; }, clearTimeout(id) { if (timers[id - 1]) timers[id - 1].f = null; },
+    Promise, console, Core: require('./core.js'), Data: require('./data.js')
   };
   vm.createContext(ctx); vm.runInContext(ui, ctx);
-  const g = { ctx, els, mem, lines, timers, run: c => vm.runInContext(c, ctx), fire: (s, t, e) => (listeners[s + ':' + t] || []).forEach(f => f(e)) };
-  g.move = m => ctx.arrows[m].onclick();
+  const g = { ctx, els, mem, env, timers, run: c => vm.runInContext(c, ctx) };
+  // Give the tiles real-looking positions: 60px apart, 56px wide.
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) { const t = g.run(`E.tiles[${r}][${c}]`); t.offsetLeft = c * 60; t.offsetTop = r * 60; }
+  const E = g.run('E');
+  g.E = E; g.field = E.field;
   g.grid = () => g.run('S.grid');
-  g.board = () => board.innerHTML;
-  g.tilesWithFeedback = () => (board.innerHTML.match(/class="tile (ok|no)"/g) || []).length;
-  g.press = (r, c, x, y) => g.fire('#board', 'pointerdown', { target: { closest: () => ({ dataset: { r: String(r), c: String(c) } }) }, clientX: x, clientY: y, pointerId: 1 });
-  g.dragTo = (x, y) => g.fire('#board', 'pointermove', { clientX: x, clientY: y });
-  g.release = (x, y) => g.fire('#board', 'pointerup', { clientX: x, clientY: y });
+  g.shown = () => { let s = ''; for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) s += E.tiles[r][c].textContent; return s; };
+  g.arrow = m => E.arrows[m]; g.lock = k => E.lockBtns[k];
+  g.clones = () => E.field.children.filter(c => c.classList.contains('clone'));
+  g.flush = async () => { g.env.animations.splice(0).forEach(a => a.resolve()); for (let i = 0; i < 5; i++) await Promise.resolve(); };
   g.runTimers = () => { const t = timers.splice(0); t.forEach(x => x.f && x.f()); };
-  g.shownGrid = () => { const rows = []; [...board.innerHTML.matchAll(/data-r="(\d)" data-c="(\d)">(.)</g)].forEach(m => { rows[+m[1] * 4 + +m[2]] = m[3]; }); return rows.join(''); };
-  g.setEasy = on => { g.els['#easyToggle'].checked = on; g.els['#easyToggle'].onchange(); };
-  g.setGrid = grid => { g.run('S.grid = ' + JSON.stringify(grid) + '; save(); render()'); };
+  g.press = (r, c, x, y) => (E.field.listeners.pointerdown || []).forEach(f => f({ target: E.tiles[r][c], clientX: x, clientY: y, pointerId: 1 }));
+  g.dragTo = (x, y) => (E.field.listeners.pointermove || []).forEach(f => f({ clientX: x, clientY: y }));
+  g.release = (x, y) => (E.field.listeners.pointerup || []).forEach(f => f({ clientX: x, clientY: y }));
+  g.tilesLocked = () => { let n = 0; E.tiles.forEach(row => row.forEach(t => { if (t.classList.contains('locked')) n++; })); return n; };
+  g.tilesFeedback = () => { let n = 0; E.tiles.forEach(row => row.forEach(t => { if (t.classList.contains('ok') || t.classList.contains('no')) n++; })); return n; };
+  g.msg = () => els['#msg'] ? els['#msg'].textContent : '';
   return g;
 }
-const same = (a, b, msg) => assert.strictEqual(JSON.stringify(a), JSON.stringify(b), msg);
-const count = (s, re) => (s.match(re) || []).length;
 
-// loads the day's puzzle with 16 tiles, 16 arrows, nothing marked
-let g = boot();
-const p = g.run('puzzle'), C = g.ctx.Core, states = C.pathStates(p.start, p.solution);
-assert.strictEqual(g.grid(), p.start);
-assert.strictEqual(count(g.board(), /class="tile /g), 16);
-assert.strictEqual(count(g.board(), /class="arrow"/g), 16);
-assert.strictEqual(g.tilesWithFeedback(), 0, 'no feedback on load');
-assert.strictEqual(g.els['#par'].textContent, p.par);
-assert.strictEqual(g.els['#undo'].disabled, true);
-assert.strictEqual(g.els['#showpath'].style.display, 'none', 'no path button while playing');
-assert.strictEqual(g.els['#easyBadge'].style.display, 'none', 'easy mode is off by default');
+(async () => {
+  let g = boot();
+  const p = g.run('puzzle'), C = g.ctx.Core, states = C.pathStates(p.start, p.solution);
 
-// a move changes the grid, counts, and enables undo; undo restores it
-g.move('r0+');
-assert.strictEqual(g.grid(), C.applyMove(p.start, 'r0+'));
-assert.strictEqual(g.els['#moves'].textContent, 1);
-assert.strictEqual(g.els['#undo'].disabled, false);
-g.els['#undo'].onclick();
-assert.strictEqual(g.grid(), p.start);
-assert.strictEqual(g.els['#moves'].textContent, 0);
+  // ---- the board is built once, with the arrows and lock icons where they belong ----
+  assert.strictEqual(g.field.children.length, 16, 'sixteen tiles in the field');
+  assert.strictEqual(Object.keys(g.E.arrows).length, 16);
+  assert.strictEqual(Object.keys(g.E.lockBtns).length, 8);
+  assert.strictEqual(g.shown(), p.start);
+  assert.strictEqual(g.tilesFeedback(), 0, 'no feedback on load');
+  assert.strictEqual(g.tilesLocked(), 0);
+  assert(Object.values(g.E.lockBtns).every(b => b.textContent === '🔓'), 'every lock icon starts open');
+  assert.strictEqual(g.arrow('r0+').style.gridColumn, '7'); assert.strictEqual(g.arrow('c0-').style.gridRow, '2');
+  assert.strictEqual(g.lock('r2').style.gridColumn, '1'); assert.strictEqual(g.lock('c1').style.gridRow, '1');
+  const arrowsBefore = Object.values(g.E.arrows).slice();
 
-// no feedback until Check; Check shows rows and uses a check; a move clears it
-g.move('c1+');
-assert.strictEqual(g.tilesWithFeedback(), 0);
-g.els['#check'].onclick();
-assert.strictEqual(g.tilesWithFeedback(), 16, 'every tile is marked after a check');
-assert.strictEqual(g.els['#checks'].textContent, 2);
-same(JSON.parse(g.mem['slip:state']).locks, [], 'normal mode never locks');
-g.move('c1-');
-assert.strictEqual(g.tilesWithFeedback(), 0, 'feedback clears after a move');
+  // ---- an arrow move: letters change in place, the line animates with copies, arrows never animate ----
+  g.arrow('r1+').onclick();
+  assert.strictEqual(g.grid(), C.applyMove(p.start, 'r1+'));
+  assert.strictEqual(g.shown(), g.grid(), 'tiles show the new letters straight away');
+  let clones = g.clones();
+  assert.strictEqual(clones.length, 5, 'a full row: three sliding, one leaving, one entering');
+  assert.strictEqual(g.env.animations.length, 5);
+  for (let c = 0; c < 4; c++) assert.strictEqual(g.E.tiles[1][c].style.visibility, 'hidden', 'the real tiles of the line are hidden while the copies move');
+  assert.strictEqual(g.E.tiles[0][0].style.visibility, undefined, 'other tiles are untouched');
+  const exit = clones.find(c => c.style.left === '180px' && g.env.animations.find(a => a.el === c).kf[1].transform === 'translate(60px, 0px)');
+  assert(exit, 'the last letter leaves by the right edge');
+  const enter = clones.find(c => c.style.left === '-60px');
+  assert(enter, 'and a copy of it enters from beyond the left edge');
+  assert.strictEqual(enter.textContent, exit.textContent, 'the entering copy is the same letter');
+  assert.strictEqual(g.env.animations.find(a => a.el === enter).kf[1].transform, 'translate(60px, 0px)', 'it slides one tile in');
+  clones.forEach(c => assert.strictEqual(c.parent, g.field, 'copies live inside the clipped field'));
+  await g.flush();
+  assert.strictEqual(g.clones().length, 0, 'copies are removed when the animation ends');
+  for (let c = 0; c < 4; c++) assert.strictEqual(g.E.tiles[1][c].style.visibility, '', 'the real tiles are shown again');
+  assert.strictEqual(g.env.violations.length, 0, 'arrows and lock icons are never moved or animated');
+  assert(Object.values(g.E.arrows).every((a, i) => a === arrowsBefore[i]), 'the arrow elements are the same objects: nothing was re-created');
 
-// the path cannot be opened mid-game
-g.run('openReplay()');
-assert.strictEqual(g.run('R'), null, 'replay does not open while the game is live');
+  // starting a second move mid-animation finishes the first cleanly
+  g.arrow('c2-').onclick(); g.arrow('r3-').onclick();
+  assert.strictEqual(g.clones().length, 5, 'only the latest move has copies');
+  await g.flush();
+  assert.strictEqual(g.clones().length, 0);
+  assert.strictEqual(g.shown(), g.grid());
+  // column moves go up and down
+  g.arrow('c0+').onclick();
+  assert(g.env.animations.some(a => /translate\(0px, 60px\)/.test(a.kf[1].transform)), 'a column slide moves vertically');
+  await g.flush();
 
-// dragging
-g.els['#reset'].onclick();
-const before = g.grid();
-g.press(2, 1, 100, 100); g.release(100, 100);
-assert.strictEqual(g.grid(), before, 'a tap does nothing');
-g.press(2, 1, 100, 100); g.dragTo(125, 108);
-assert(g.lines['.tile[data-r="2"]'].every(t => t.classList.has('line')), 'row 2 is highlighted');
-assert(g.els['#board'].classList.has('dragging'), 'board is dimmed while dragging');
-assert(g.lines['.tile[data-r="2"]'].every(t => /translateX\(/.test(t.style.transform)), 'the row follows the finger');
-g.dragTo(130, 160);
-assert(g.lines['.tile[data-r="2"]'].every(t => /translateX\(/.test(t.style.transform)), 'axis stays locked once chosen');
-g.release(160, 112);
-assert.strictEqual(g.grid(), C.applyMove(before, 'r2+'), 'release past a third of a tile commits one step right');
-assert(!g.els['#board'].classList.has('dragging'), 'highlight clears after release');
-const mid = g.grid();
-g.press(0, 0, 100, 100); g.dragTo(100, 112); g.release(100, 112);
-assert.strictEqual(g.grid(), mid, 'a short drag does not move anything');
-assert(g.lines['.tile[data-c="0"]'].every(t => t.style.transform === ''), 'the line returns to place');
-g.press(1, 3, 100, 100); g.dragTo(103, 70); g.release(101, 60);
-assert.strictEqual(g.grid(), C.applyMove(mid, 'c3-'));
+  // ---- undo ----
+  g = boot();
+  g.arrow('r0+').onclick(); await g.flush();
+  g.els['#undo'].onclick();
+  assert.strictEqual(g.grid(), p.start); assert.strictEqual(g.shown(), p.start);
+  assert.strictEqual(g.clones().length, 5, 'undo animates too');
+  await g.flush();
 
-// hint
-g = boot();
-g.els['#hint'].onclick();
-assert(g.ctx.hintArrows['.arrow[data-m="' + p.solution[0] + '"]'].classList.has('hint'), 'the hint arrow is highlighted');
-assert(/Try /.test(g.els['#msg'].textContent));
-assert.strictEqual(g.run('S.hints'), 1);
-while (!g.run('S.over')) { g.els['#hint'].onclick(); g.move(g.run('Core.hintMove(S.grid, puzzle.words, puzzle.alts, 10, S.locks)')); }
-assert.strictEqual(g.run('S.won'), true);
-assert.strictEqual(g.run('S.moves.length'), p.par);
-assert(/💡/.test(g.run('shareTextValue')), 'share text mentions hints');
-assert(!/🔒/.test(g.run('shareTextValue')), 'no easy tag outside easy mode');
+  // ---- dragging ----
+  g = boot();
+  g.press(2, 1, 100, 100); g.dragTo(105, 102);                  // under the lock distance
+  assert(!g.E.board.classList.contains('dragging'), 'a small wobble does not start a drag');
+  g.dragTo(125, 104);
+  assert(g.E.board.classList.contains('dragging'), 'the board dims while dragging');
+  assert(g.E.tiles[2].every(t => t.classList.contains('line')), 'the row lights up');
+  assert(g.E.tiles[2].every(t => t.style.transform === 'translate(25px, 0)'), 'the row follows the finger');
+  assert(g.E.tiles[1].every(t => !t.classList.contains('line')), 'other rows stay dim');
+  let wrap = g.clones();
+  assert.strictEqual(wrap.length, 1, 'the wrapping letter shows entering');
+  assert.strictEqual(wrap[0].textContent, g.E.tiles[2][3].textContent); assert.strictEqual(wrap[0].style.left, '0px');
+  assert.strictEqual(wrap[0].style.transform, 'translate(-35px, 0)', 'it starts one tile outside the field edge');
+  g.dragTo(130, 190);                                           // the axis stays locked even if the finger drifts
+  assert(g.E.tiles[2].every(t => /translate\(\d+px, 0\)/.test(t.style.transform)));
+  g.dragTo(300, 100);                                           // clamped to one tile
+  assert(g.E.tiles[2].every(t => t.style.transform === 'translate(60px, 0)'));
+  g.dragTo(70, 100);                                            // flipping direction swaps the wrap letter to the other end
+  wrap = g.clones();
+  assert.strictEqual(wrap.length, 1); assert.strictEqual(wrap[0].textContent, g.E.tiles[2][0].textContent); assert.strictEqual(wrap[0].style.left, '180px');
+  g.dragTo(140, 100);
+  g.release(140, 100);
+  assert.strictEqual(g.grid(), C.applyMove(p.start, 'r2+'), 'release past a third of a tile commits one step');
+  assert(g.E.tiles[2].every(t => !t.style.transform && !t.classList.contains('line')), 'the preview is cleared');
+  assert(!g.E.board.classList.contains('dragging'));
+  assert.strictEqual(g.clones().length, 5, 'the slide finishes from where the finger left it');
+  assert(g.env.animations.some(a => a.kf[0].transform === 'translate(40px, 0px)'), 'the animation starts at the dragged offset');
+  assert(g.env.animations.every(a => /translate\(40px, 0px\)|translate\(0px, 0px\)/.test(a.kf[0].transform)));
+  await g.flush();
+  // a short drag springs back
+  const mid = g.grid();
+  g.press(0, 0, 100, 100); g.dragTo(100, 112); g.release(100, 112);
+  assert.strictEqual(g.grid(), mid, 'a short drag does not move anything');
+  assert(g.E.tiles.every(row => row.every(t => !t.style.transform)), 'the line returns to place');
+  assert(g.env.animations.some(a => a.kf[0].transform === 'translate(0, 12px)' && a.kf[1].transform === 'translate(0, 0)'), 'the spring-back is animated');
+  await g.flush();
+  // dragging up commits an up move
+  g.press(1, 3, 100, 100); g.dragTo(103, 70); g.release(101, 60);
+  assert.strictEqual(g.grid(), C.applyMove(mid, 'c3-'));
+  await g.flush();
+  // a tap does nothing
+  const before = g.grid(); g.press(2, 2, 50, 50); g.release(50, 50);
+  assert.strictEqual(g.grid(), before);
+  assert.strictEqual(g.env.violations.length, 0);
 
-// ---- a win: the shortest path can be watched ----
-g = boot();
-p.solution.forEach(m => g.move(m));
-assert.strictEqual(g.run('S.won'), true);
-assert.strictEqual(g.run('S.moves.length'), p.par);
-assert(/tile done/.test(g.board()));
-assert.strictEqual(JSON.parse(g.mem['slip:stats']).wins, 1);
-assert(g.els['#words'].textContent.includes(p.words[0]));
-assert.strictEqual(g.els['#showpath'].style.display, '', 'path button appears after a win');
-assert.strictEqual(g.els['#dlgPath'].style.display, '', 'and in the result dialog');
-const savedWin = g.mem['slip:state'], finalGrid = g.grid();
-g.els['#showpath'].onclick();
-assert.notStrictEqual(g.run('R'), null, 'replay opened');
-assert.strictEqual(g.els['#replay'].style.display, '', 'replay panel is visible');
-assert.strictEqual(g.shownGrid(), p.start, 'replay starts from the beginning state');
-assert.strictEqual(count(g.board(), /data-m="[^"]+" disabled/g), 16, 'arrows are disabled during replay');
-assert(!/tile done/.test(g.board()), 'start grid is not shown as solved');
-assert(/shortest path takes /.test(g.els['#replayCap'].textContent));
-assert.strictEqual(g.els['#showpath'].style.display, 'none', 'path button hides during replay');
-for (let i = 0; i < p.par; i++) {
-  g.runTimers();
-  assert(g.ctx.hintArrows['.arrow[data-m="' + p.solution[i] + '"]'].classList.has('hint'), 'next arrow is pulsed at step ' + i);
-  assert(/Next: /.test(g.els['#replayCap'].textContent));
-  g.runTimers();
-  assert.strictEqual(g.run('R.k'), i + 1);
-  assert.strictEqual(g.shownGrid(), states[i + 1], 'replay shows step ' + (i + 1));
-}
-assert(/tile done/.test(g.board()), 'the last frame is solved');
-assert(/Solved/.test(g.els['#replayCap'].textContent));
-g.runTimers();
-assert.strictEqual(g.run('R.playing'), false, 'autoplay stops at the end');
-assert.strictEqual(g.els['#rPlay'].textContent, 'Replay');
-assert.strictEqual(g.els['#rNext'].disabled, true);
-assert.strictEqual(g.mem['slip:state'], savedWin, 'replay does not change the saved game');
-assert.strictEqual(g.grid(), finalGrid); assert.strictEqual(g.run('S.moves.length'), p.par);
-assert.strictEqual(JSON.parse(g.mem['slip:stats']).played, 1, 'replay does not count as a play');
-g.els['#rPrev'].onclick();
-assert.strictEqual(g.shownGrid(), states[p.par - 1]); assert.strictEqual(g.run('R.playing'), false);
-g.els['#rPrev'].onclick();
-assert.strictEqual(g.shownGrid(), states[p.par - 2]);
-g.els['#rNext'].onclick();
-assert.strictEqual(g.shownGrid(), states[p.par - 1]);
-for (let i = 0; i < 20; i++) g.els['#rPrev'].onclick();
-assert.strictEqual(g.shownGrid(), p.start); assert.strictEqual(g.els['#rPrev'].disabled, true);
-g.els['#rPlay'].onclick(); assert.strictEqual(g.run('R.playing'), true);
-g.els['#rPlay'].onclick(); assert.strictEqual(g.run('R.playing'), false, 'pause works');
-g.els['#rClose'].onclick();
-assert.strictEqual(g.run('R'), null);
-assert.strictEqual(g.els['#replay'].style.display, 'none');
-assert.strictEqual(g.shownGrid(), finalGrid, 'the finished board is shown again');
-assert.strictEqual(g.els['#showpath'].style.display, '');
-assert.strictEqual(count(g.board(), /data-m="[^"]+" disabled/g), 0);
-g.run("doMove('r0+')");
-assert.strictEqual(g.run('S.moves.length'), p.par);
-g = boot({ 'slip:state': savedWin });
-assert.strictEqual(g.run('S.won'), true);
-assert.strictEqual(g.els['#showpath'].style.display, '', 'path button is there after a reload too');
+  // ---- locking rows and columns ----
+  g = boot();
+  g.lock('r2').onclick();
+  same(g.run('S.locks'), { rows: [2], cols: [] });
+  assert.strictEqual(g.lock('r2').textContent, '🔒'); assert(g.lock('r2').classList.contains('on'));
+  assert(/Row 3 locked/.test(g.msg()));
+  assert.strictEqual(g.run('S.lockUsed'), true);
+  assert.strictEqual(g.tilesLocked(), 4, 'the locked row is drawn as locked');
+  assert(g.arrow('r2+').disabled && g.arrow('r2-').disabled, 'the locked row arrows are disabled');
+  assert(!g.arrow('r1+').disabled && !g.arrow('c0+').disabled);
+  g.lock('c1').onclick();
+  same(g.run('S.locks'), { rows: [2], cols: [1] });
+  assert.strictEqual(g.tilesLocked(), 7, 'a locked row and column freeze seven cells');
+  assert(g.arrow('c1+').disabled && g.arrow('c1-').disabled);
+  // a free row beside a locked column slides only its free cells and nothing else moves
+  const gridLocked = g.grid();
+  g.arrow('r0+').onclick();
+  assert.strictEqual(g.grid(), C.applyMoveLocked(gridLocked, 'r0+', { rows: [2], cols: [1] }));
+  assert.strictEqual(g.grid()[1], gridLocked[1], 'the locked column letter did not move');
+  assert.strictEqual(g.clones().length, 3, 'a line with a frozen cell has no edge wrap: three copies, one per free cell');
+  assert(g.env.animations.some(a => /translate\(-180px, 0px\)/.test(a.kf[1].transform)), 'the wrapping letter slides straight to its slot');
+  await g.flush();
+  // drags along a locked line are refused with a message
+  const keep = g.grid();
+  g.press(2, 0, 100, 100); g.dragTo(130, 102);
+  assert(!g.E.board.classList.contains('dragging')); assert(/Row 3 is locked/.test(g.msg()));
+  g.release(160, 102);
+  assert.strictEqual(g.grid(), keep);
+  g.press(0, 1, 100, 100); g.dragTo(101, 130);
+  assert(/Column 2 is locked/.test(g.msg()));
+  g.release(101, 160); assert.strictEqual(g.grid(), keep);
+  // moves along free lines are still fine, from a frozen tile too
+  g.press(2, 3, 100, 100); g.dragTo(101, 70); g.release(101, 50);
+  assert.strictEqual(g.grid(), C.applyMoveLocked(keep, 'c3-', { rows: [2], cols: [1] }), 'dragging a frozen tile along its free line works');
+  await g.flush();
+  // unlocking restores movement and keeps the "locks used" mark
+  g.lock('r2').onclick(); g.lock('c1').onclick();
+  assert.strictEqual(g.tilesLocked(), 0); assert(!g.arrow('r2+').disabled);
+  assert.strictEqual(g.run('S.lockUsed'), true, 'once used, always marked as used');
+  assert(Object.values(g.E.lockBtns).every(b => b.textContent === '🔓'));
+  // undo steps back under the locks each move was made with, even after the locks change
+  g = boot();
+  g.lock('r1').onclick();
+  const g0 = g.grid();
+  g.arrow('c0+').onclick(); await g.flush();
+  assert.strictEqual(g.grid(), C.applyMoveLocked(g0, 'c0+', { rows: [1], cols: [] }));
+  g.lock('r1').onclick();
+  g.els['#undo'].onclick();
+  assert.strictEqual(g.grid(), g0, 'undo restores the exact grid after the lock was removed');
+  await g.flush();
+  // reset clears the locks but not the mark
+  g.lock('c2').onclick(); g.arrow('r0+').onclick(); await g.flush();
+  g.els['#reset'].onclick();
+  same(g.run('S.locks'), { rows: [], cols: [] }); assert.strictEqual(g.grid(), p.start); assert.strictEqual(g.run('S.lockUsed'), true);
+  assert.strictEqual(g.tilesLocked(), 0);
+  // a hint never suggests a locked line
+  g = boot(); g.lock('r0').onclick();
+  const lk = g.run('S.locks');
+  g.els['#hint'].onclick();
+  const hm = g.run('Core.hintMove(S.grid, puzzle.words, puzzle.alts, 10, S.locks)');
+  assert(!hm || (C.isValidMove(hm, lk)), 'hint respects locks');
+  if (hm) assert(g.arrow(hm).classList.contains('hint'));
+  // locks that make the puzzle impossible say so
+  g = boot(); g.lock('r0').onclick(); g.lock('r1').onclick(); g.lock('r2').onclick(); g.lock('r3').onclick();
+  g.els['#hint'].onclick();
+  assert(/lock may be in the way/.test(g.msg()));
+  assert(Object.values(g.E.arrows).every(a => a.disabled), 'with every row locked nothing can move');
 
-// ---- giving up ----
-g = boot(); g.els['#giveup'].onclick();
-assert.strictEqual(g.run('S.won'), false); assert.strictEqual(g.run('S.over'), true);
-assert.strictEqual(JSON.parse(g.mem['slip:stats']).streak, 0);
-assert.strictEqual(g.els['#showpath'].style.display, '');
-g.els['#dlgPath'].onclick();
-assert.strictEqual(g.shownGrid(), p.start, 'replay starts from the beginning state after giving up');
-g.els['#rNext'].onclick();
-assert.strictEqual(g.shownGrid(), C.applyMove(p.start, p.solution[0]));
-
-// ---- out of checks ends the game ----
-g = boot();
-g.move('r0+'); g.move('c0+');
-g.els['#check'].onclick(); assert.strictEqual(g.run('S.over'), false, 'two checks left, still playing');
-g.els['#check'].onclick(); assert.strictEqual(g.run('S.over'), false, 'one check left, still playing');
-g.els['#check'].onclick();
-assert.strictEqual(g.run('S.over'), true, 'the third check ends the game');
-assert.strictEqual(g.run('S.won'), false);
-assert.strictEqual(g.els['#checks'].textContent, 0);
-assert.strictEqual(g.tilesWithFeedback(), 16, 'the final check is still visible on the board');
-assert(/Out of checks/.test(g.els['#msg'].textContent));
-assert.strictEqual(g.els['#check'].disabled, true); assert.strictEqual(g.els['#hint'].disabled, true);
-assert.strictEqual(JSON.parse(g.mem['slip:stats']).played, 1);
-assert.strictEqual(g.els['#showpath'].style.display, '', 'path is available after running out of checks');
-g.els['#showpath'].onclick();
-assert.strictEqual(g.shownGrid(), p.start);
-g.els['#rClose'].onclick();
-assert.strictEqual(g.tilesWithFeedback(), 16, 'the final feedback returns after the replay closes');
-
-// ======================= EASY MODE =======================
-// A grid a few moves from the end that already has at least one correct row.
-let nearK = p.par - 1;
-while (nearK > 0 && !C.rowMatches(states[nearK], p.words, p.alts).some(Boolean)) nearK--;
-const near = states[nearK], nearCorrect = C.lockableRows(near, p.words, p.alts, []);
-assert(nearCorrect.length >= 1, 'test setup: a near-final grid with a correct row');
-
-// the setting is saved and shows a badge
-g = boot();
-g.setEasy(true);
-assert.strictEqual(JSON.parse(g.mem['slip:settings']).easy, true);
-assert.strictEqual(g.els['#easyBadge'].style.display, 'block');
-g = boot({ 'slip:settings': JSON.stringify({ easy: true }) });
-assert.strictEqual(g.run('settings.easy'), true, 'the setting survives a reload');
-
-// with easy mode off, correct rows do not lock
-g = boot(); g.setGrid(near); g.els['#check'].onclick();
-same(g.run('S.locks'), []);
-assert(!/tile locked/.test(g.board()));
-
-// with easy mode on, a Check locks the correct rows
-g = boot(); g.setEasy(true); g.setGrid(near);
-g.els['#check'].onclick();
-same(g.run('S.locks'), nearCorrect, 'the correct rows lock');
-same(g.run('S.lockPoints'), [0]);
-assert(/Locked row/.test(g.els['#msg'].textContent));
-const lockedRow = nearCorrect[0];
-assert.strictEqual(count(g.board(), /class="tile locked"/g), 4 * nearCorrect.length, 'locked tiles are drawn as locked');
-assert(new RegExp('data-m="r' + lockedRow + '-" disabled').test(g.board()), 'the locked row arrows are disabled');
-assert(new RegExp('data-m="r' + lockedRow + '\\+" disabled').test(g.board()));
-assert(!new RegExp('data-m="c0-" disabled').test(g.board()), 'column arrows still work');
-assert.strictEqual(g.els['#showpath'].style.display, 'none');
-
-// a locked row will not move: not by arrow, not by drag
-const lockedGrid = g.grid();
-g.run("doMove('r" + lockedRow + "+')");
-assert.strictEqual(g.grid(), lockedGrid); assert.strictEqual(g.run('S.moves.length'), 0);
-assert(/is locked/.test(g.els['#msg'].textContent));
-g.press(lockedRow, 1, 100, 100); g.dragTo(130, 102);
-assert(!g.els['#board'].classList.has('dragging'), 'no drag starts along a locked row');
-g.release(160, 102);
-assert.strictEqual(g.grid(), lockedGrid);
-
-// a column slide skips the locked rows and the locked letters stay put
-g.press(lockedRow, 2, 100, 100); g.dragTo(101, 70);   // vertical drag from a locked tile slides its column
-assert(g.els['#board'].classList.has('dragging'), 'dragging a locked tile along its column is allowed');
-g.release(101, 55);
-const after = g.grid(), L = g.run('S.locks');
-assert.strictEqual(after, C.applyMoveLocked(lockedGrid, 'c2-', L));
-L.forEach(r => assert.strictEqual(C.rows(after)[r], C.rows(lockedGrid)[r], 'locked row ' + r + ' did not change'));
-assert.notStrictEqual(after, lockedGrid);
-
-// undo only steps back through moves made after the lock
-assert.strictEqual(g.els['#undo'].disabled, false);
-g.els['#undo'].onclick();
-assert.strictEqual(g.grid(), lockedGrid);
-assert.strictEqual(g.els['#undo'].disabled, true, 'moves made before the lock cannot be undone');
-
-// hints respect the locks and following them finishes the game
-g.els['#hint'].onclick();
-const hm = g.run('Core.hintMove(S.grid, puzzle.words, puzzle.alts, 10, S.locks)');
-assert(hm && C.validMoves(g.run('S.locks')).includes(hm), 'the hint never uses a locked row');
-while (!g.run('S.over')) { g.move(g.run('Core.hintMove(S.grid, puzzle.words, puzzle.alts, 10, S.locks)')); }
-assert.strictEqual(g.run('S.won'), true, 'an easy mode game can be finished');
-assert.strictEqual(g.run('S.easyUsed'), true);
-assert(/🔒easy/.test(g.run('shareTextValue')), 'the share text marks easy mode');
-assert(!/tile locked/.test(g.board()), 'the finished board shows no locks');
-
-// the replay ignores locks and shows the normal shortest path
-g.els['#showpath'].onclick();
-assert.strictEqual(g.shownGrid(), p.start);
-assert(!/tile locked/.test(g.board()));
-assert.strictEqual(count(g.board(), /data-m="[^"]+" disabled/g), 16);
-g.els['#rClose'].onclick();
-
-// Reset clears the locks but not the used checks
-g = boot(); g.setEasy(true); g.setGrid(near); g.els['#check'].onclick();
-assert(g.run('S.locks').length >= 1);
-g.els['#reset'].onclick();
-same(g.run('S.locks'), []); same(g.run('S.lockPoints'), []);
-assert.strictEqual(g.grid(), p.start); assert.strictEqual(g.run('S.checks'), 1, 'a Reset does not refund checks');
-assert(!/tile locked/.test(g.board()));
-
-// turning easy mode off releases the locks
-g = boot(); g.setEasy(true); g.setGrid(near); g.els['#check'].onclick();
-assert(g.run('S.locks').length >= 1);
-g.setEasy(false);
-same(g.run('S.locks'), []);
-assert(/Locks released/.test(g.els['#msg'].textContent));
-assert.strictEqual(g.els['#easyBadge'].style.display, 'none');
-assert(!/tile locked/.test(g.board()));
-
-// three correct rows lock only two
-const solvedGrid = states[p.par], threeRows = C.applyMove(solvedGrid, 'r3+');
-if (C.rowMatches(threeRows, p.words, p.alts).filter(Boolean).length === 3) {
-  g = boot(); g.setEasy(true); g.setGrid(threeRows); g.els['#check'].onclick();
-  same(g.run('S.locks'), [0, 1], 'the cap is two rows');
-  assert(/Two rows is the most/.test(g.els['#msg'].textContent) || /Locked row/.test(g.els['#msg'].textContent));
+  // ---- check, hint, replay, give up, out of checks ----
+  g = boot();
+  g.arrow('r0+').onclick(); await g.flush();
   g.els['#check'].onclick();
-  same(g.run('S.locks'), [0, 1], 'a later check never adds a third lock');
-}
+  assert.strictEqual(g.tilesFeedback(), 16, 'every tile is marked after a check');
+  assert.strictEqual(g.els['#checks'].textContent, 2);
+  g.arrow('r0-').onclick();
+  assert.strictEqual(g.tilesFeedback(), 0, 'feedback clears after a move');
+  await g.flush();
 
-// a second Check locks further correct rows, and earlier locks stay (never more than two in total)
-g = boot(); g.setEasy(true);
-g.setGrid(near); g.els['#check'].onclick();
-same(g.run('S.locks'), nearCorrect.slice(0, 2));
-const firstLocks = g.run('S.locks').slice();
-assert.strictEqual(firstLocks.length, 1, 'setup: this puzzle has one correct row at first');
-g.setGrid(threeRows); g.els['#check'].onclick();
-assert.strictEqual(g.run('S.locks').length, 2, 'the second check locks one more row');
-assert(g.run('S.locks').includes(firstLocks[0]), 'the earlier lock stays');
-same(g.run('S.lockPoints'), [0, 0]);
-g.setGrid(threeRows); g.els['#check'].onclick();   // would end the game on the third check; locks stay at two
-assert.strictEqual(g.run('S.locks').length, 2);
+  // a win with no locks: the share text says so, and the path can be replayed
+  g = boot();
+  p.solution.forEach(m => g.arrow(m).onclick());
+  assert.strictEqual(g.run('S.won'), true); assert.strictEqual(g.run('S.moves.length'), p.par);
+  g.runTimers();
+  assert(/🔓 no locks/.test(g.run('shareTextValue')), 'the share screen shows that no locks were used');
+  assert(!/🔒/.test(g.run('shareTextValue')));
+  assert(Object.values(g.E.lockBtns).every(b => b.disabled), 'lock icons are disabled after the game');
+  assert(Object.values(g.E.arrows).every(a => a.disabled));
+  assert.strictEqual(g.els['#showpath'].style.display, '');
+  const finalGrid = g.grid(), saved = g.mem['slip:state'];
+  g.els['#showpath'].onclick();
+  assert.strictEqual(g.shown(), p.start, 'replay starts from the beginning state');
+  assert(Object.values(g.E.arrows).every(a => a.disabled) && Object.values(g.E.lockBtns).every(b => b.disabled));
+  assert(/shortest path takes /.test(g.els['#replayCap'].textContent));
+  for (let i = 0; i < p.par; i++) {
+    g.runTimers();
+    assert(g.arrow(p.solution[i]).classList.contains('hint'), 'next arrow is flashed at step ' + i);
+    g.runTimers();
+    assert.strictEqual(g.shown(), states[i + 1], 'replay shows step ' + (i + 1));
+    await g.flush();
+  }
+  assert(g.E.tiles[0][0].classList.contains('done'), 'the last frame is solved');
+  assert.strictEqual(g.mem['slip:state'], saved, 'replay never changes the saved game');
+  assert.strictEqual(g.env.violations.length, 0);
+  g.els['#rClose'].onclick();
+  assert.strictEqual(g.shown(), finalGrid);
 
-// saved games: real locks restore, bogus locks are dropped
-g = boot(); g.setEasy(true); g.setGrid(near); g.els['#check'].onclick();
-const lockedSave = g.mem['slip:state'];
-g = boot({ 'slip:state': lockedSave, 'slip:settings': JSON.stringify({ easy: true }) });
-same(g.run('S.locks'), nearCorrect, 'locks restore after a reload');
-assert(/tile locked/.test(g.board()));
-const bogus = Object.assign(JSON.parse(lockedSave), { locks: [3, 2, 1], lockPoints: [0] });
-g = boot({ 'slip:state': JSON.stringify(bogus) });
-same(g.run('S.locks'), [], 'locks on rows that are not correct are dropped');
-const tooMany = Object.assign(JSON.parse(lockedSave), { locks: [0, 1, 2] });
-g = boot({ 'slip:state': JSON.stringify(tooMany) });
-same(g.run('S.locks'), [], 'more than two locks are dropped');
+  // a win that used locks: the share screen says so, even if they were removed again
+  g = boot();
+  g.lock('c3').onclick(); g.lock('c3').onclick();
+  p.solution.forEach(m => g.arrow(m).onclick());
+  assert.strictEqual(g.run('S.won'), true);
+  g.runTimers();
+  assert(/🔒 locks used/.test(g.run('shareTextValue'))); assert(!/no locks/.test(g.run('shareTextValue')));
 
-// saved games from another day or another puzzle, or with tampered letters, are discarded
-for (const bad of [{ date: '2020-01-01' }, { id: 'other' }, { grid: 'ZZZZZZZZZZZZZZZZ' }]) {
-  const base = { date: g.run('today'), id: p.id, grid: p.start, moves: ['r0+'], checks: 1, hints: 0, feedback: null, locks: [], lockPoints: [], over: false, won: false };
-  g = boot({ 'slip:state': JSON.stringify(Object.assign(base, bad)) });
-  assert.strictEqual(g.grid(), p.start, 'fresh puzzle for ' + JSON.stringify(bad));
-}
-console.log('smoke ok');
+  // the replay shows no locks even if the game was finished with locks on
+  g = boot(); g.lock('r0').onclick();
+  g.els['#giveup'].onclick();
+  assert.strictEqual(g.run('S.over'), true);
+  g.els['#showpath'].onclick();
+  assert.strictEqual(g.tilesLocked(), 0, 'replay frames never show locks');
+  assert.strictEqual(g.shown(), p.start);
+  g.els['#rClose'].onclick();
+  assert.strictEqual(g.tilesLocked(), 4, 'the finished game shows its locks again afterwards');
+
+  // give up and out of checks
+  g = boot(); g.els['#giveup'].onclick();
+  assert.strictEqual(g.run('S.won'), false); assert.strictEqual(JSON.parse(g.mem['slip:stats']).streak, 0);
+  g.runTimers(); assert(/did not solve it/.test(g.run('shareTextValue'))); assert(/🔓 no locks/.test(g.run('shareTextValue')));
+  g = boot();
+  g.arrow('r0+').onclick(); await g.flush();
+  g.els['#check'].onclick(); assert.strictEqual(g.run('S.over'), false);
+  g.els['#check'].onclick(); assert.strictEqual(g.run('S.over'), false);
+  g.els['#check'].onclick();
+  assert.strictEqual(g.run('S.over'), true); assert.strictEqual(g.run('S.won'), false);
+  assert.strictEqual(g.tilesFeedback(), 16, 'the final check stays on the board');
+  assert(/Out of checks/.test(g.msg()));
+  assert.strictEqual(g.els['#showpath'].style.display, '');
+
+  // ---- saved games ----
+  g = boot(); g.lock('r1').onclick(); g.lock('c2').onclick(); g.arrow('c0+').onclick(); await g.flush();
+  const lockedSave = g.mem['slip:state'];
+  g = boot({ 'slip:state': lockedSave });
+  same(g.run('S.locks'), { rows: [1], cols: [2] }, 'locks come back after a reload');
+  assert.strictEqual(g.run('S.lockUsed'), true); assert.strictEqual(g.run('S.moves.length'), 1);
+  assert.strictEqual(g.shown(), g.grid()); assert(g.lock('r1').classList.contains('on'));
+  g.els['#undo'].onclick();
+  assert.strictEqual(g.grid(), p.start, 'undo still works after a reload');
+  const mk = patch => JSON.stringify(Object.assign(JSON.parse(lockedSave), patch));
+  for (const bad of [{ locks: { rows: [9], cols: [] } }, { locks: { rows: [1, 1], cols: [] } }, { locks: { rows: 'x', cols: [] } },
+    { locks: [0, 1] }, { moveLocks: [] }, { moveLocks: [{ rows: [7], cols: [] }] }, { date: '2020-01-01' }, { id: 'other' }, { grid: 'ZZZZZZZZZZZZZZZZ' }]) {
+    g = boot({ 'slip:state': mk(bad) });
+    assert.strictEqual(g.grid(), p.start, 'a bad save is discarded: ' + JSON.stringify(bad));
+    same(g.run('S.locks'), { rows: [], cols: [] });
+  }
+  // a save from before locks existed still loads
+  const old = { date: g.run('today'), id: p.id, grid: C.applyMove(p.start, 'r0+'), moves: ['r0+'], checks: 1, hints: 0, feedback: null, over: false, won: false };
+  g = boot({ 'slip:state': JSON.stringify(old) });
+  assert.strictEqual(g.grid(), old.grid); same(g.run('S.moveLocks'), [{ rows: [], cols: [] }]); assert.strictEqual(g.run('S.lockUsed'), false);
+  g.els['#undo'].onclick(); assert.strictEqual(g.grid(), p.start);
+  // an old easy-mode save with locked rows is discarded
+  g = boot({ 'slip:state': JSON.stringify(Object.assign({}, old, { locks: [0], lockPoints: [0] })) });
+  assert.strictEqual(g.grid(), p.start);
+  console.log('smoke ok');
+})().catch(e => { console.error(e); process.exit(1); });

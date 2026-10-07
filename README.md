@@ -4,38 +4,43 @@ A daily word puzzle. Slide the rows and columns of a 4×4 letter grid until the 
 
 ## How to play
 
-- **Drag** a tile along its row or column. The drag locks to whichever direction you move more, the row or column lights up, and it follows your finger. Release past a third of a tile to slide one step.
+- **Drag** a tile along its row or column. The drag locks to whichever direction you move more, the line lights up, and it follows your finger. The letter that would wrap round shows entering from the far edge. Release past a third of a tile to slide one step. A shorter drag springs back.
 - **Or tap an arrow** at the end of a row or column.
-- Every slide animates: the line glides one step, and the letter that wraps round leaves one edge while its copy enters from the other.
 - A row slide only reorders that row. A column slide carries letters between words, so fixing one row can break another.
 - Nothing is marked while you slide. **Check** (three per puzzle) shows which rows currently spell a hidden word. Use all three without solving the puzzle and the game ends.
 - **Hint** highlights the arrow for the first move of a shortest solution from where you are. The share text shows how many hints you used.
 - Par is the fewest moves possible. The share text shows your moves against par.
 - Undo and Reset are free. Give up reveals the words and ends the game.
 
-## Easy mode (Settings)
+## Locking rows and columns
 
-Tap **⚙ Settings** and switch on **Easy mode**. It is off by default and the choice is remembered.
+Beside every row (left) and every column (top) there is a 🔓 icon. Tap it to lock that line (🔒). Tap again to unlock.
 
-- When you press Check, every row that spells a hidden word **locks** (shown with a 🔒), up to two rows.
-- A locked row never moves. Its arrows stop working, dragging along it does nothing, and a column slide skips it: the column's other tiles cycle among themselves.
-- Locks add up over later Checks, but never past two rows.
-- **Why two?** With two or more free rows, every arrangement of the free letters can still be reached, so the puzzle is always solvable. With three rows locked, the last row could only rotate and might be stuck. The tests check both facts by exhaustive search (all 40,320 arrangements of eight letters are reachable with two locks, and only four with three).
-- Undo steps back through moves made after the lock. Moves made before a lock stay, because the lock was built on them.
-- **Reset** clears the locks and puts the grid back to the start. It does not refund checks.
-- Turning easy mode off in Settings releases any locks.
-- **Hint** knows about locks, so it never suggests a move on a locked row.
-- The share text gets a 🔒easy tag.
-- The replay of the shortest path shows the normal puzzle with no locks.
+- A locked line cannot be slid. Its arrows are disabled and dragging along it shows a message.
+- Locked lines also **protect their letters from crossing slides**. A cell is frozen if its row or its column is locked. Sliding a free row cycles only that row's unfrozen cells, and sliding a free column cycles only that column's unfrozen cells. So locking a correct row keeps it safe while you work on the rest.
+- You can lock any lines you like, correct or not, and unlock them at any time. Locking the wrong line can make a puzzle impossible until you unlock it. **Hint** tells you when a lock may be in the way.
+- Undo restores the exact grid even if you changed locks since the move, because each move remembers the locks it was made with.
+- Reset clears all locks.
+- **The result screen and share text say whether you used locks:** 🔓 no locks, or 🔒 locks used. Once you have locked anything, the game counts as using locks even if you unlock it again.
+- The shortest-path replay shows the normal puzzle with no locks.
+
+## Smooth, steady animation
+
+- The board is built once. Tiles, arrows and lock icons are updated in place and never re-created, so the arrows and icons never move or flicker.
+- A slide is drawn with temporary copies of the tiles, moved with the Web Animations API (transform only, so no layout work). The real tiles of the line are hidden while the copies move and then shown again already holding the new letters.
+- The tile area clips the copies. A letter that wraps round leaves one edge and enters from the opposite edge and never passes over an arrow.
+- A line that contains frozen cells has no clean edge, so its wrapping letter slides straight to its new slot.
+- A new move during an animation finishes the old one first, so animations never stack.
+- The hint and replay highlight flash the arrow's colour rather than scaling it.
 
 ## Shortest path replay
 
 When a game ends, however it ends (you solved it, gave up, or ran out of checks), a **Show shortest path** button appears under the board and in the result dialog. It replays the shortest solution from the starting grid, one animated move at a time:
 
-- The arrow for the next move pulses, then the line slides.
+- The arrow for the next move flashes, then the line slides.
 - A caption names each move, such as "Move 2 of 5: column 3 up".
 - **Pause / Play / Replay**, **Back** and **Next** let you step through at your own pace. **Done** returns to your finished game.
-- The arrows are disabled during the replay. The replay never changes your saved game, your stats or your move count.
+- Arrows and lock icons are disabled during the replay. The replay never changes your saved game, your stats or your move count.
 
 Other real words built from the same letters count too. For example BARE counts as BEAR. The `alts` list in each puzzle holds these.
 
@@ -43,8 +48,8 @@ Other real words built from the same letters count too. For example BARE counts 
 
 | File | Purpose |
 |---|---|
-| `index.html` | The game screen, dragging, animation, settings and the replay. |
-| `core.js` | Grid moves, locked-row moves, win check, exact solver, hints, path states, scrambler, stats, share text. |
+| `index.html` | The game screen: board, dragging, animation, locks, replay. |
+| `core.js` | Grid moves, locked-line moves, win check, exact solver, hints, path states, scrambler, stats, share text. |
 | `data.js` | The puzzles. Generated by `make-puzzles.js`. |
 | `make-puzzles.js` | Scrambles each word set, solves it exactly, writes `data.js`. |
 | `test.js` | Logic tests. |
@@ -54,8 +59,8 @@ Other real words built from the same letters count too. For example BARE counts 
 ## Commands
 
 ```text
-node test.js          # 43 logic tests, including exact par, hint walks, easy mode reachability and locked-row solving
-node smoke.js         # screen checks: drag lock, hints, win, give up, out of checks, replay, easy mode, bad saves
+node test.js          # 42 logic tests: exact par, hint walks, locked-line moves, solving under locks, share text
+node smoke.js         # screen checks: built-once board, animation copies, drag preview, locks, undo, replay, saves
 node make-puzzles.js  # rebuild data.js from the word sets
 ```
 
@@ -84,11 +89,11 @@ Open `index.html`, or run `python3 -m http.server` in the folder.
 
 ## Storage
 
-Progress, stats and settings are kept in the browser's local storage on that device. They do not sync. A saved game from another day, another puzzle or with altered letters is discarded. Saved locks are kept only if they are at most two rows and each one currently spells a hidden word.
+Progress and stats are kept in the browser's local storage on that device. They do not sync. A saved game from another day, another puzzle, with altered letters, or with invalid locks is discarded. A save from an older build without locks still loads. A save from the old easy mode (locked rows) is discarded.
 
 ## Known limits
 
 - 14 puzzles, so they repeat every 14 days.
-- Par is the fewest moves with no locks. In easy mode a locked game can need more moves than par.
-- The slide animation, drag feel and replay timing are covered only by a fake-DOM test, so they need a check on a real phone.
+- Par is the fewest moves with no locks. A game played with locks can need more.
+- The animation, drag feel, replay timing and the 7×7 layout on small screens are covered only by a fake-DOM test and by calculation, so they need a check on a real phone.
 - A word set can sometimes be rebuilt into other real words that are not in `alts`. The grid has 16 letters, so some combinations are possible. If a player reports one, add it to `ALTS` and rebuild.

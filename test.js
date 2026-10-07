@@ -3,6 +3,7 @@ const C = require('./core.js'), D = require('./data.js');
 let n = 0; const t = (name, f) => { f(); n++; console.log('ok -', name); };
 const P = D.PUZZLES;
 const LETTERS = 'ABCDEFGHIJKLMNOP';
+const L = (rows, cols) => ({ rows: rows || [], cols: cols || [] });
 
 // ---------- the grid ----------
 t('slide row right wraps the last letter to the front', () => assert.strictEqual(C.slideRow(LETTERS, 0, 1), 'DABCEFGHIJKLMNOP'));
@@ -65,10 +66,6 @@ t('alternative spellings count: BARE for BEAR, LEAD for DEAL', () => {
   assert.deepStrictEqual(C.rowMatches('BAREROADLEADLION', w, alts), [true, true, true, true]);
   assert.deepStrictEqual(C.rowMatches('BAREBEARLEADLION', w, alts), [true, false, true, true]);
   assert.deepStrictEqual(C.rowMatches('BAREBAREXXXXLION', w, alts), [true, false, false, true]);
-});
-t('matchedWords names the target each row spells', () => {
-  const w = ['BEAR', 'ROAD', 'DEAL', 'LION'], alts = { BEAR: ['BARE'] };
-  assert.deepStrictEqual(C.matchedWords('BAREXXXXDEALLION', w, alts), ['BEAR', null, 'DEAL', 'LION']);
 });
 
 // ---------- solving, hints, puzzles ----------
@@ -142,128 +139,118 @@ t('alternative spellings are anagrams of their target and never repeat a word in
 });
 t('a puzzle exists for every day for two years', () => { for (let i = 0; i < 730; i++) assert(C.pick(P, i).start); });
 
-// ---------- easy mode: locked rows ----------
-const LOCK_SETS = [[], [0], [1], [2], [3], [0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]];
-t('locked rows: with no locks, applyMoveLocked is the same as applyMove', () => {
+// ---------- locking rows and columns ----------
+const LOCK_SETS = [L(), L([0]), L([3]), L([], [1]), L([], [2]), L([0], [0]), L([1, 2]), L([], [0, 3]), L([2], [1, 3]), L([0, 3], [2])];
+t('locks: with no locks, applyMoveLocked is the same as applyMove', () => {
   for (let k = 0; k < 50; k++) {
     const g = C.shuffle(LETTERS.split(''), k + 1).join('');
-    C.ALL_MOVES.forEach(m => assert.strictEqual(C.applyMoveLocked(g, m, []), C.applyMove(g, m)));
+    C.ALL_MOVES.forEach(m => { assert.strictEqual(C.applyMoveLocked(g, m, L()), C.applyMove(g, m)); assert.strictEqual(C.applyMoveLocked(g, m, null), C.applyMove(g, m)); });
   }
 });
-t('locked rows: a column slide skips the locked row and cycles the others', () => {
-  assert.strictEqual(C.applyMoveLocked(LETTERS, 'c1+', [1]), 'ANCDEFGHIBKLMJOP');
-  assert.strictEqual(C.applyMoveLocked(LETTERS, 'c1-', [1]), 'AJCDEFGHINKLMBOP');
-  assert.strictEqual(C.applyMoveLocked(LETTERS, 'c0+', [0, 2]), 'ABCDMFGHIJKLENOP');
+t('locks: a locked row is skipped by column slides', () => {
+  assert.strictEqual(C.applyMoveLocked(LETTERS, 'c1+', L([1])), 'ANCDEFGHIBKLMJOP');
+  assert.strictEqual(C.applyMoveLocked(LETTERS, 'c1-', L([1])), 'AJCDEFGHINKLMBOP');
+  assert.strictEqual(C.applyMoveLocked(LETTERS, 'c0+', L([0, 2])), 'ABCDMFGHIJKLENOP');
 });
-t('locked rows: with rows 0 and 2 locked, a column slide swaps the two free cells', () => {
-  const s = C.applyMoveLocked(LETTERS, 'c1+', [0, 2]);
-  assert.strictEqual(s[1], 'B'); assert.strictEqual(s[9], 'J');           // locked rows keep their cells
-  assert.strictEqual(s[5], 'N'); assert.strictEqual(s[13], 'F');          // free rows 1 and 3 swap
+t('locks: a locked column is skipped by row slides', () => {
+  assert.strictEqual(C.applyMoveLocked(LETTERS, 'r1+', L([], [0])), 'ABCDEHFGIJKLMNOP');
+  assert.strictEqual(C.applyMoveLocked(LETTERS, 'r1-', L([], [0])), 'ABCDEGHFIJKLMNOP');
+  assert.strictEqual(C.applyMoveLocked(LETTERS, 'r2+', L([], [1, 2])), 'ABCDEFGHLJKIMNOP');
 });
-t('locked rows: a row slide on a locked row does nothing and is not a valid move', () => {
-  assert.strictEqual(C.applyMoveLocked(LETTERS, 'r1+', [1]), LETTERS);
-  assert(!C.validMoves([1]).includes('r1+') && !C.validMoves([1]).includes('r1-'));
-  assert(C.validMoves([1]).includes('r2+'));
+t('locks: a row and a column locked together freeze their whole lines', () => {
+  const lk = L([0], [0]);
+  const s = C.applyMoveLocked(LETTERS, 'r1+', lk);        // row 1 free, column 0 frozen: cells F,G,H cycle
+  assert.strictEqual(s, 'ABCDEHFGIJKLMNOP');
+  const u = C.applyMoveLocked(LETTERS, 'c1+', lk);        // column 1 free, row 0 frozen: cells F,J,N cycle
+  assert.strictEqual(u, 'ABCDENGHIFKLMJOP');
 });
-t('locked rows: valid move counts are 16, 14 and 12', () => {
-  assert.strictEqual(C.validMoves([]).length, 16);
-  assert.strictEqual(C.validMoves([2]).length, 14);
-  assert.strictEqual(C.validMoves([0, 3]).length, 12);
+t('locks: a locked line, or a line with fewer than two free cells, is not a valid move', () => {
+  assert(!C.isValidMove('r2+', L([2])) && !C.isValidMove('r2-', L([2])));
+  assert(!C.isValidMove('c1+', L([], [1])));
+  assert(C.isValidMove('r0+', L([2])));
+  assert(!C.isValidMove('r0+', L([], [0, 1, 2])));         // only one free cell in the row
+  assert(C.isValidMove('r0+', L([], [0, 1])));
+  assert.strictEqual(C.applyMoveLocked(LETTERS, 'r2+', L([2])), LETTERS);
 });
-t('locked rows: a locked row never changes, and no move changes the letters, from any grid', () => {
-  LOCK_SETS.forEach(locks => {
+t('locks: valid move counts', () => {
+  assert.strictEqual(C.validMoves(L()).length, 16);
+  assert.strictEqual(C.validMoves(L([2])).length, 14);
+  assert.strictEqual(C.validMoves(L([0], [0])).length, 12);
+  assert.strictEqual(C.validMoves(L([0, 1, 2, 3])).length, 0);
+});
+t('locks: frozen cells never change and the letters are preserved, from any grid', () => {
+  LOCK_SETS.forEach(lk => {
     for (let k = 0; k < 30; k++) {
       const g = C.shuffle(LETTERS.split(''), k + 7).join('');
-      C.validMoves(locks).forEach(m => {
-        const s = C.applyMoveLocked(g, m, locks);
-        locks.forEach(r => assert.strictEqual(C.rows(s)[r], C.rows(g)[r], 'locks ' + locks + ' move ' + m));
+      C.validMoves(lk).forEach(m => {
+        const s = C.applyMoveLocked(g, m, lk);
+        for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) if (C.isFrozen(r, c, lk)) assert.strictEqual(s[r * 4 + c], g[r * 4 + c], JSON.stringify(lk) + ' ' + m);
         assert.strictEqual(s.split('').sort().join(''), g.split('').sort().join(''));
       });
     }
   });
 });
-t('locked rows: every valid move is undone by its inverse', () => {
-  LOCK_SETS.forEach(locks => {
+t('locks: every valid move is undone by its inverse under the same locks', () => {
+  LOCK_SETS.forEach(lk => {
     const g = C.shuffle(LETTERS.split(''), 3).join('');
-    C.validMoves(locks).forEach(m => assert.strictEqual(C.applyMoveLocked(C.applyMoveLocked(g, m, locks), C.invert(m), locks), g, 'locks ' + locks + ' ' + m));
+    C.validMoves(lk).forEach(m => assert.strictEqual(C.applyMoveLocked(C.applyMoveLocked(g, m, lk), C.invert(m), lk), g, JSON.stringify(lk) + ' ' + m));
   });
 });
-t('locked rows: a column returns after as many slides as it has free rows', () => {
-  [[[], 4], [[1], 3], [[0, 2], 2]].forEach(([locks, k]) => {
-    let s = LETTERS; for (let i = 0; i < k; i++) s = C.applyMoveLocked(s, 'c2+', locks);
-    assert.strictEqual(s, LETTERS, 'locks ' + locks);
-    let u = LETTERS; for (let i = 0; i < k - 1; i++) u = C.applyMoveLocked(u, 'c2+', locks);
+t('locks: a line returns after as many slides as it has free cells', () => {
+  [['c2+', L(), 4], ['c2+', L([1]), 3], ['c2+', L([0, 2]), 2], ['r1+', L([], [0]), 3], ['r1+', L([], [0, 3]), 2]].forEach(([m, lk, k]) => {
+    let s = LETTERS; for (let i = 0; i < k; i++) s = C.applyMoveLocked(s, m, lk);
+    assert.strictEqual(s, LETTERS, m + JSON.stringify(lk));
+    let u = LETTERS; for (let i = 0; i < k - 1; i++) u = C.applyMoveLocked(u, m, lk);
     assert.notStrictEqual(u, LETTERS);
   });
 });
-t('lockableRows: correct rows lock, up to two, and never twice', () => {
-  const w = ['BEAR', 'ROAD', 'DEAL', 'LION'];
-  assert.deepStrictEqual(C.lockableRows('XXXXXXXXXXXXXXXX', w, {}, []), []);
-  assert.deepStrictEqual(C.lockableRows('BEARXXXXDEALXXXX', w, {}, []), [0, 2]);
-  assert.deepStrictEqual(C.lockableRows('BEARROADDEALXXXX', w, {}, []), [0, 1]);        // three correct, only two lock
-  assert.deepStrictEqual(C.lockableRows('BEARROADDEALXXXX', w, {}, [0]), [1]);          // one already locked
-  assert.deepStrictEqual(C.lockableRows('BEARROADDEALXXXX', w, {}, [0, 1]), []);        // cap reached
-  assert.strictEqual(C.MAX_LOCKS, 2);
+t('locks: cloneLocks copies and sorts, and hasLocks / isFrozen agree', () => {
+  const a = L([2, 0], [3]), b = C.cloneLocks(a);
+  assert.deepStrictEqual(b, { rows: [0, 2], cols: [3] }); b.rows.push(1); assert.deepStrictEqual(a.rows, [2, 0]);
+  assert(C.hasLocks(a) && !C.hasLocks(L()) && !C.hasLocks(null) && !C.hasLocks(C.NO_LOCKS));
+  assert(C.isFrozen(2, 1, a) && C.isFrozen(1, 3, a) && !C.isFrozen(1, 1, a));
 });
-t('locked rows: with two locks every arrangement of the other eight letters can be reached', () => {
-  // Eight distinct labelled cells in two free rows. A full search over all of them must reach all 8! arrangements.
-  [[0, 1], [1, 3], [2, 3]].forEach(locks => {
-    const free = C.freeRows(locks), start = 'ABCDEFGHIJKLMNOP';
-    const seen = new Set([start]); let frontier = [start];
-    while (frontier.length) {
-      const next = [];
-      for (const s of frontier) for (const m of C.validMoves(locks)) {
-        const u = C.applyMoveLocked(s, m, locks);
-        if (!seen.has(u)) { seen.add(u); next.push(u); }
-      }
-      frontier = next;
-    }
-    assert.strictEqual(seen.size, 40320, 'locks ' + locks);
-  });
+t('locks: goalStates keep the frozen letters, and there are none when a locked cell cannot be right', () => {
+  const p = P[0], solved = C.applyAll(p.start, p.solution);
+  const open = C.goalStates(solved, p.words, p.alts, L());
+  assert(open.length >= 24 && open.includes(solved));
+  const locked = C.goalStates(solved, p.words, p.alts, L([0], [1]));
+  assert(locked.length >= 1 && locked.length < open.length);
+  locked.forEach(g => { assert.strictEqual(g.slice(0, 4), solved.slice(0, 4)); for (let r = 0; r < 4; r++) assert.strictEqual(g[r * 4 + 1], solved[r * 4 + 1]); });
+  assert.deepStrictEqual(C.goalStates(p.start, p.words, p.alts, L([0, 1, 2, 3])), []);
 });
-t('locked rows: three locks would leave only four arrangements, which is why the cap is two', () => {
-  const locks = [0, 1, 2], start = 'ABCDEFGHIJKLMNOP', seen = new Set([start]); let frontier = [start];
-  while (frontier.length) {
-    const next = [];
-    for (const s of frontier) for (const m of C.validMoves(locks)) {
-      const u = C.applyMoveLocked(s, m, locks);
-      if (!seen.has(u)) { seen.add(u); next.push(u); }
-    }
-    frontier = next;
-  }
-  assert.strictEqual(seen.size, 4);
-});
-t('locked rows: a puzzle with locked correct rows can always be finished, and the solution never touches a locked row', () => {
+t('locks: a puzzle scrambled under any locks can be solved under those locks, never using a locked line', () => {
   const rnd = C.mulberry32(11);
   P.forEach(p => {
     const solved = C.applyAll(p.start, p.solution);
-    LOCK_SETS.filter(l => l.length > 0 && l.length <= 2).forEach(locks => {
+    LOCK_SETS.filter(lk => C.hasLocks(lk)).forEach(lk => {
+      const mv = C.validMoves(lk);
+      if (!mv.length) return;
       let g = solved;
-      for (let i = 0; i < 6; i++) { const mv = C.validMoves(locks); g = C.applyMoveLocked(g, mv[Math.floor(rnd() * mv.length)], locks); }
-      locks.forEach(r => assert(C.rowMatches(g, p.words, p.alts)[r], p.id + ' locked row must still be correct'));
+      for (let i = 0; i < 5; i++) g = C.applyMoveLocked(g, mv[Math.floor(rnd() * mv.length)], lk);
       if (C.isSolved(g, p.words, p.alts)) return;
-      const sol = C.minMoves(g, p.words, 8, p.alts, locks);
-      assert(sol, p.id + ' locks ' + locks + ' no solution');
-      assert(sol.length <= 6, p.id + ' locks ' + locks);
-      sol.forEach(m => assert(C.validMoves(locks).includes(m), 'solution used a locked move ' + m));
-      let h = g; sol.forEach(m => { h = C.applyMoveLocked(h, m, locks); });
-      assert(C.isSolved(h, p.words, p.alts), p.id + ' locks ' + locks);
+      const sol = C.minMoves(g, p.words, 8, p.alts, lk);
+      assert(sol, p.id + ' ' + JSON.stringify(lk) + ' no solution');
+      assert(sol.length <= 5, p.id + ' ' + JSON.stringify(lk));
+      sol.forEach(m => assert(C.isValidMove(m, lk), 'solution used a locked move ' + m));
+      let h = g; sol.forEach(m => { h = C.applyMoveLocked(h, m, lk); });
+      assert(C.isSolved(h, p.words, p.alts), p.id + ' ' + JSON.stringify(lk));
     });
   });
 });
-t('locked rows: minMoves refuses a lock on a row that is not a hidden word', () => {
+t('locks: minMoves says there is no route when the locks make a solution impossible', () => {
   const p = P[0];
-  assert.strictEqual(C.minMoves(p.start, p.words, 8, p.alts, [0]), null);
+  assert.strictEqual(C.minMoves(p.start, p.words, 9, p.alts, L([0, 1, 2, 3])), null);
+  assert.strictEqual(C.minMoves(p.start, p.words, 9, p.alts, L([0], [])), null);       // row 0 is not a hidden word
 });
-t('locked rows: hints respect locks, and following them solves the puzzle', () => {
+t('locks: hints respect locks, and following them finishes the puzzle', () => {
   const p = P[13], states = C.pathStates(p.start, p.solution), g0 = states[p.par - 1];
-  const locks = C.lockableRows(g0, p.words, p.alts, []);
-  assert(locks.length >= 1);
+  const lk = L([C.rowMatches(g0, p.words, p.alts).indexOf(true)]);
   let g = g0, steps = 0;
   while (!C.isSolved(g, p.words, p.alts)) {
-    const m = C.hintMove(g, p.words, p.alts, 10, locks);
-    assert(m && C.validMoves(locks).includes(m));
-    g = C.applyMoveLocked(g, m, locks); steps++;
+    const m = C.hintMove(g, p.words, p.alts, 10, lk);
+    assert(m && C.isValidMove(m, lk));
+    g = C.applyMoveLocked(g, m, lk); steps++;
     assert(steps < 10);
   }
 });
@@ -282,12 +269,13 @@ t('stats: streak grows on consecutive days and resets on a gap or a loss', () =>
   s = C.updateStats(s, true, '2026-10-08'); assert.strictEqual(s.streak, 1); assert.strictEqual(s.best, 2);
   s = C.updateStats(s, false, '2026-10-09'); assert.strictEqual(s.streak, 0);
 });
-t('share text shows moves against par, hints used, and easy mode', () => {
-  const s = C.shareText('2026-10-07', 6, 5, true, 'https://example.com/slip/', 2, true);
-  assert(s.includes('6 moves (par 5)')); assert(s.includes('💡2')); assert(s.includes('🔒easy'));
-  assert(s.includes('🟦🟦🟦🟦🟦🟧')); assert(s.endsWith('https://example.com/slip/'));
-  const plain = C.shareText('2026-10-07', 5, 5, true, '', 0, false);
-  assert(!plain.includes('💡') && !plain.includes('🔒'));
-  assert(C.shareText('2026-10-07', 3, 5, false).includes('did not solve it'));
+t('share text shows moves against par, hints used, and whether locks were used', () => {
+  const none = C.shareText('2026-10-07', 6, 5, true, 'https://example.com/slip/', 2, false);
+  assert(none.includes('6 moves (par 5)')); assert(none.includes('💡2')); assert(none.includes('🔓 no locks')); assert(!none.includes('🔒'));
+  assert(none.includes('🟦🟦🟦🟦🟦🟧')); assert(none.endsWith('https://example.com/slip/'));
+  const used = C.shareText('2026-10-07', 5, 5, true, '', 0, true);
+  assert(used.includes('🔒 locks used')); assert(!used.includes('no locks')); assert(!used.includes('💡'));
+  const lost = C.shareText('2026-10-07', 3, 5, false, '', 0, false);
+  assert(lost.includes('did not solve it') && lost.includes('🔓 no locks'));
 });
 console.log('\n' + n + ' tests passed');

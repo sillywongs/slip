@@ -72,24 +72,34 @@
     return out;
   }
 
-  // ---- locked rows (easy mode) ----
-  // A locked row never moves. Its row arrows do nothing, and a column slide cycles only the unlocked rows.
-  // At most MAX_LOCKS rows can lock. With two or more free rows every arrangement of the free letters can
-  // still be reached, so the puzzle stays solvable. With one free row only its four rotations would exist.
-  const MAX_LOCKS = 2;
-  const freeRows = locks => [0, 1, 2, 3].filter(r => !(locks || []).includes(r));
-  const validMoves = locks => ALL_MOVES.filter(m => m[0] === 'c' ? freeRows(locks).length >= 2 : !(locks || []).includes(+m[1]));
-  function applyMoveLocked(state, m, locks) {
-    const L = locks || [];
-    if (!L.length) return applyMove(state, m);
+  // ---- locked rows and columns ----
+  // Locks are { rows: [...], cols: [...] }. A cell is frozen if its row or its column is locked.
+  // A locked line cannot be slid. Sliding a free line cycles only that line's frozen-free cells,
+  // so a locked column's letters stay put while a free row slides past them.
+  const NO_LOCKS = Object.freeze({ rows: Object.freeze([]), cols: Object.freeze([]) });
+  const freeRows = locks => [0, 1, 2, 3].filter(r => !((locks && locks.rows) || []).includes(r));
+  const freeCols = locks => [0, 1, 2, 3].filter(c => !((locks && locks.cols) || []).includes(c));
+  const isFrozen = (r, c, locks) => !!locks && ((locks.rows || []).includes(r) || (locks.cols || []).includes(c));
+  const hasLocks = locks => !!locks && ((locks.rows || []).length + (locks.cols || []).length) > 0;
+  const cloneLocks = locks => ({ rows: ((locks && locks.rows) || []).slice().sort((a, b) => a - b), cols: ((locks && locks.cols) || []).slice().sort((a, b) => a - b) });
+  // The slots a slide of this line moves: the line's cells that are not frozen.
+  function lineSlots(m, locks) {
     const i = +m[1];
-    if (m[0] === 'r') return L.includes(i) ? state : applyMove(state, m);
-    const U = freeRows(L);
-    if (U.length < 2) return state;
-    const col = U.map(r => state[r * 4 + i]);
-    const n = m[2] === '+' ? [col[col.length - 1]].concat(col.slice(0, -1)) : col.slice(1).concat(col[0]);
+    if (m[0] === 'r') return (locks && (locks.rows || []).includes(i)) ? [] : freeCols(locks);
+    return (locks && (locks.cols || []).includes(i)) ? [] : freeRows(locks);
+  }
+  // A move is valid if its line is not locked and at least two cells can move.
+  const isValidMove = (m, locks) => lineSlots(m, locks).length >= 2;
+  const validMoves = locks => ALL_MOVES.filter(m => isValidMove(m, locks));
+  function applyMoveLocked(state, m, locks) {
+    if (!hasLocks(locks)) return applyMove(state, m);
+    const slots = lineSlots(m, locks);
+    if (slots.length < 2) return state;
+    const i = +m[1], idx = s => (m[0] === 'r' ? i * 4 + s : s * 4 + i);
+    const cells = slots.map(s => state[idx(s)]);
+    const n = m[2] === '+' ? [cells[cells.length - 1]].concat(cells.slice(0, -1)) : cells.slice(1).concat(cells[0]);
     const a = state.split('');
-    U.forEach((r, k) => { a[r * 4 + i] = n[k]; });
+    slots.forEach((s, k) => { a[idx(s)] = n[k]; });
     return a.join('');
   }
 
@@ -97,7 +107,6 @@
   // 'alts' maps a target word to other spellings of the same letters that also count (BEAR -> BARE).
   // Without it, a player who builds a real word we did not list would be marked wrong.
   const spellings = (word, alts) => [word].concat((alts && alts[word]) || []);
-  // For each row, the target word it spells (each target used once), or null.
   function matchedWords(state, words, alts) {
     const left = words.slice();
     return rows(state).map(r => {
@@ -107,34 +116,30 @@
   }
   const rowMatches = (state, words, alts) => matchedWords(state, words, alts).map(Boolean);
   const isSolved = (state, words, alts) => rowMatches(state, words, alts).every(Boolean);
-  // The rows that would lock after a Check: correct rows that are not locked yet, up to the cap.
-  function lockableRows(state, words, alts, locks) {
-    const L = locks || [], m = rowMatches(state, words, alts), out = [];
-    for (let r = 0; r < 4; r++) if (m[r] && !L.includes(r) && L.length + out.length < MAX_LOCKS) out.push(r);
-    return out;
-  }
 
   // ---- solving (puzzle maker, tests, hints and the shortest-path replay) ----
   function permutations(a) {
     return a.length < 2 ? [a] : a.flatMap((x, i) => permutations(a.slice(0, i).concat(a.slice(i + 1))).map(p => [x, ...p]));
   }
-  // Shortest list of moves that solves the grid, respecting any locked rows. Searches from both ends at once.
+  // Every grid that counts as solved and keeps the frozen cells as they are now.
+  function goalStates(start, words, alts, locks) {
+    const variants = words.reduce((acc, w) => acc.flatMap(a => spellings(w, alts).map(s => a.concat(s))), [[]]);
+    const out = new Set();
+    variants.forEach(v => permutations(v).forEach(p => {
+      const g = p.join('');
+      for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) if (isFrozen(r, c, locks) && g[r * 4 + c] !== start[r * 4 + c]) return;
+      out.add(g);
+    }));
+    return Array.from(out);
+  }
+  // Shortest list of moves that solves the grid, respecting locked lines. Searches from both ends at once.
+  // Returns null if there is no route within the limit (or the locks make a solution impossible).
   function minMoves(start, words, limit, alts, locks) {
     limit = limit || 10;
-    const L = locks || [], free = freeRows(L), moves = validMoves(L);
+    const L = locks || NO_LOCKS, moves = validMoves(L);
     const apply = (s, m) => applyMoveLocked(s, m, L);
-    const matched = matchedWords(start, words, alts), remaining = words.slice();
-    for (const r of L) {
-      if (!matched[r]) return null;
-      remaining.splice(remaining.indexOf(matched[r]), 1);
-    }
-    const startRows = rows(start);
-    const variants = remaining.reduce((acc, w) => acc.flatMap(a => spellings(w, alts).map(s => a.concat(s))), [[]]);
-    const goals = Array.from(new Set(variants.flatMap(v => permutations(v).map(p => {
-      const out = startRows.slice();
-      free.forEach((r, k) => { out[r] = p[k]; });
-      return out.join('');
-    }))));
+    const goals = goalStates(start, words, alts, L);
+    if (!goals.length) return null;
     if (goals.includes(start)) return [];
     const A = new Map([[start, { d: 0 }]]);
     const B = new Map(goals.map(g => [g, { d: 0 }]));
@@ -174,7 +179,7 @@
     }
     return null;
   }
-  // The first move of a shortest solution from this grid, or null if the grid is solved or too far away.
+  // The first move of a shortest solution from this grid, or null if the grid is solved or no route is found.
   function hintMove(state, words, alts, limit, locks) {
     const sol = minMoves(state, words, limit || 10, alts, locks);
     return sol && sol.length ? sol[0] : null;
@@ -204,13 +209,15 @@
     s.last = key; s.lastWon = won;
     return s;
   }
-  function shareText(key, moves, par, won, url, hints, easy) {
+  // usedLocks: true if any row or column was locked during the game.
+  function shareText(key, moves, par, won, url, hints, usedLocks) {
     const bar = Array.from({ length: moves }, (_, i) => (i < par ? '🟦' : '🟧')).join('');
-    const head = 'Slip ' + key + (won ? ' ' + moves + ' moves (par ' + par + ')' : ' did not solve it') + (hints ? ' 💡' + hints : '') + (easy ? ' 🔒easy' : '');
+    const head = 'Slip ' + key + (won ? ' ' + moves + ' moves (par ' + par + ')' : ' did not solve it') +
+      (hints ? ' 💡' + hints : '') + (usedLocks ? ' 🔒 locks used' : ' 🔓 no locks');
     return head + '\n' + (won ? bar + '\n' : '') + (url || '');
   }
 
-  return { ALL_MOVES, MAX_LOCKS, dateKey, dayIndex, prevKey, mulberry32, shuffle, pick, rows, slideRow, slideCol, applyMove, applyAll,
-    invert, describeMove, pathStates, freeRows, validMoves, applyMoveLocked, matchedWords, isSolved, rowMatches, lockableRows,
-    permutations, minMoves, hintMove, scramble, updateStats, shareText };
+  return { ALL_MOVES, NO_LOCKS, dateKey, dayIndex, prevKey, mulberry32, shuffle, pick, rows, slideRow, slideCol, applyMove, applyAll,
+    invert, describeMove, pathStates, freeRows, freeCols, isFrozen, hasLocks, cloneLocks, lineSlots, isValidMove, validMoves,
+    applyMoveLocked, matchedWords, isSolved, rowMatches, permutations, goalStates, minMoves, hintMove, scramble, updateStats, shareText };
 });

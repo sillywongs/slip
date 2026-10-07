@@ -10,11 +10,10 @@
 <meta name="apple-mobile-web-app-title" content="Slip">
 <title>Slip – daily word slide puzzle</title>
 <style>
-:root{--bg:#121214;--fg:#f2f2f2;--tile:#34343c;--edge:#5a5a66;--ok:#2f7d42;--okedge:#69c27a;--no:#4a3236;--noedge:#a35c63;--accent:#4a6fa5;--cell:min(14.5vw,64px);--gap:5px}
+:root{--bg:#121214;--fg:#f2f2f2;--tile:#34343c;--edge:#5a5a66;--ok:#2f7d42;--okedge:#69c27a;--no:#4a3236;--noedge:#a35c63;--accent:#4a6fa5;--lock:#7fb0e8;--cell:min(12vw,58px);--gap:4px}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh}
 header{width:100%;max-width:480px;display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #333}
-header .right{display:flex;gap:8px}
 h1{font-size:22px;margin:0;letter-spacing:1px}
 main{width:100%;max-width:480px;padding:10px 14px 30px}
 .btn{background:#2b2b30;color:var(--fg);border:0;border-radius:8px;padding:10px 14px;font-weight:600;font-size:15px;cursor:pointer}
@@ -22,19 +21,25 @@ main{width:100%;max-width:480px;padding:10px 14px 30px}
 .btn.primary{background:var(--accent)}
 #msg{min-height:24px;text-align:center;font-weight:600;margin:6px 0}
 .help{max-width:400px;margin:6px auto 10px;text-align:center;color:#d4d4da;line-height:1.4}
-.board{position:relative;display:grid;grid-template-columns:repeat(6,var(--cell));grid-auto-rows:var(--cell);gap:var(--gap);justify-content:center;margin:10px auto;touch-action:none;user-select:none}
-.arrow{background:#24242a;color:#9a9aa8;border:0;font-size:24px;border-radius:10px;cursor:pointer}
+
+/* The board is a fixed 7x7 grid: lock icons, arrows and the tile field. Nothing here is ever re-created or
+   animated except the tiles inside .field, so the arrows and icons never move. */
+.board{display:grid;grid-template-columns:repeat(7,var(--cell));grid-template-rows:repeat(7,var(--cell));gap:var(--gap);justify-content:center;margin:10px auto;touch-action:none;user-select:none}
+.field{grid-row:3 / 7;grid-column:3 / 7;position:relative;overflow:hidden;display:grid;grid-template-columns:repeat(4,var(--cell));grid-template-rows:repeat(4,var(--cell));gap:var(--gap)}
+.arrow{background:#24242a;color:#9a9aa8;border:0;font-size:22px;border-radius:10px;cursor:pointer;padding:0}
 .arrow:active{background:var(--accent);color:#fff}
-.arrow:disabled{opacity:.35;cursor:default}
-.arrow.hint{background:var(--accent);color:#fff;opacity:1;animation:pulse .7s ease-in-out 4}
-@keyframes pulse{50%{transform:scale(1.18)}}
-.tile{background:var(--tile);border:2px solid var(--edge);border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:calc(var(--cell) * .46);cursor:grab;position:relative;z-index:1}
+.arrow:disabled{opacity:.3;cursor:default}
+.arrow.hint{animation:hintflash .7s ease-in-out 4}
+@keyframes hintflash{50%{background:var(--accent);color:#fff}}
+.lockbtn{background:transparent;border:1px solid #3a3a44;border-radius:10px;font-size:calc(var(--cell) * .42);cursor:pointer;padding:0;color:#bbb}
+.lockbtn.on{background:#1d3a5c;border-color:var(--lock)}
+.lockbtn:disabled{opacity:.3;cursor:default}
+.tile{background:var(--tile);border:2px solid var(--edge);border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:calc(var(--cell) * .46);cursor:grab;position:relative;z-index:1;will-change:transform}
 .tile.ok{background:var(--ok);border-color:var(--okedge)}
 .tile.no{background:var(--no);border-color:var(--noedge)}
 .tile.done{background:var(--ok);border-color:var(--okedge)}
-.tile.locked{background:#1f5a31;border-color:#8fd69c;cursor:not-allowed}
-.tile.locked::after{content:'🔒';position:absolute;top:1px;right:3px;font-size:calc(var(--cell) * .2);line-height:1}
-.tile.ghost{pointer-events:none;z-index:3}
+.tile.locked{box-shadow:inset 0 0 0 2px #2a4f78;border-color:var(--lock);cursor:not-allowed}
+.tile.clone{position:absolute;margin:0;z-index:5;pointer-events:none}
 .board.dragging .tile{opacity:.4}
 .board.dragging .tile.line{opacity:1;border-color:#fff;z-index:2}
 .stats{display:flex;gap:18px;justify-content:center;margin:6px 0 2px;color:#d4d4da}
@@ -44,15 +49,10 @@ dialog{background:#222;color:#fff;border:1px solid #555;border-radius:12px;max-w
 pre{white-space:pre-wrap}
 .words{text-align:center;font-weight:700;letter-spacing:2px;margin:8px 0;color:#bfe3c6}
 #replayCap{letter-spacing:0;min-height:2.8em;color:#d9ecff}
-.setting{display:flex;gap:12px;align-items:flex-start;margin:10px 0}
-.setting input{width:24px;height:24px;margin-top:2px;flex:none}
-.setting small{display:block;color:#bdbdc5;margin-top:4px;line-height:1.35;font-weight:400}
-.badge{display:none;text-align:center;color:#8fd69c;font-weight:600;margin:2px 0}
 </style></head><body>
-<header><h1>SLIP</h1><div class="right"><button class="btn" id="settingsBtn" aria-label="Settings">⚙ Settings</button><button class="btn" id="statsBtn">Stats</button></div></header>
+<header><h1>SLIP</h1><button class="btn" id="statsBtn">Stats</button></header>
 <main>
-  <p class="help" id="help"><b>How to play:</b> slide rows and columns until the four rows spell four hidden words, in any order. Drag a tile along its row or column, or tap an arrow. Letters that slide off one edge come back on the other. Nothing is marked until you press Check. Use all three checks without solving it and the game ends. When a game ends you can watch the shortest path.</p>
-  <div class="badge" id="easyBadge">🔒 Easy mode: correct rows lock after a Check</div>
+  <p class="help" id="help"><b>How to play:</b> slide rows and columns until the four rows spell four hidden words, in any order. Drag a tile along its row or column, or tap an arrow. Letters that slide off one edge come back on the other. Nothing is marked until you press Check. Use all three checks without solving it and the game ends. Tap a 🔓 beside a row or column to lock it so it cannot move. Your result shows whether you used any locks.</p>
   <div class="stats"><div>Moves <b id="moves">0</b></div><div>Par <b id="par">0</b></div><div>Checks left <b id="checks">3</b></div></div>
   <div id="msg"></div>
   <div class="board" id="board"></div>
@@ -76,157 +76,213 @@ pre{white-space:pre-wrap}
   </div>
 </main>
 <dialog id="dlg"><div id="dlgBody"></div><div class="actions"><button class="btn" id="share">Share</button><button class="btn" id="dlgPath">Show shortest path</button><button class="btn" id="close">Close</button></div></dialog>
-<dialog id="settings">
-  <h3>Settings</h3>
-  <label class="setting"><input type="checkbox" id="easyToggle"><span><b>Easy mode</b><small>After a Check, rows that spell a hidden word lock in place, up to two rows. A locked row never moves: its arrows stop working and column slides skip it. Turning this off releases any locks.</small></span></label>
-  <div class="actions"><button class="btn primary" id="settingsClose">Done</button></div>
-</dialog>
 <script src="core.js"></script><script src="data.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 const SITE_URL = location.origin && location.origin !== 'null' ? location.origin + location.pathname : '';
-const MAX_CHECKS = 3, SLIDE_MS = 170;
+const MAX_CHECKS = 3, SLIDE_MS = 170, COMMIT_FRACTION = 0.35, DRAG_LOCK_PX = 10;
 const store = {
   get(k, d) { try { return JSON.parse(localStorage.getItem('slip:' + k)) ?? d; } catch (e) { return d; } },
   set(k, v) { localStorage.setItem('slip:' + k, JSON.stringify(v)); }
 };
 const today = Core.dateKey(), idx = Core.dayIndex();
 const puzzle = Core.pick(Data.PUZZLES, idx);
-let S, settings, shareTextValue = '', hintTimer = null;
+let S, shareTextValue = '', hintTimer = null;
 
-function freshState() {
-  return { date: today, id: puzzle.id, grid: puzzle.start, moves: [], checks: 0, hints: 0, feedback: null, locks: [], lockPoints: [], easyUsed: false, over: false, won: false };
+// ---------- saved game ----------
+function validLocks(l) {
+  return !!l && Array.isArray(l.rows) && Array.isArray(l.cols) && l.rows.concat(l.cols).every(x => Number.isInteger(x) && x >= 0 && x < 4) &&
+    new Set(l.rows).size === l.rows.length && new Set(l.cols).size === l.cols.length;
 }
-// A saved game is used only if it is for today's puzzle, still has today's letters, and any locks are real:
-// at most two rows, each one currently spelling a hidden word.
+function freshState() {
+  return { date: today, id: puzzle.id, grid: puzzle.start, moves: [], moveLocks: [], locks: Core.cloneLocks(null), lockUsed: false,
+    checks: 0, hints: 0, feedback: null, over: false, won: false };
+}
+// A saved game is used only if it is for today's puzzle, still has today's letters, and its locks make sense.
 function load() {
-  settings = Object.assign({ easy: false }, store.get('settings', {}));
   const saved = store.get('state', null);
-  let valid = saved && saved.date === today && saved.id === puzzle.id && typeof saved.grid === 'string' && saved.grid.length === 16 &&
+  let ok = saved && saved.date === today && saved.id === puzzle.id && typeof saved.grid === 'string' && saved.grid.length === 16 &&
     saved.grid.split('').sort().join('') === puzzle.start.split('').sort().join('') && Array.isArray(saved.moves);
-  S = valid ? saved : freshState();
+  if (ok && Array.isArray(saved.locks)) ok = saved.locks.length === 0;                 // older build: locked rows from easy mode
+  if (ok && saved.locks && !Array.isArray(saved.locks)) ok = validLocks(saved.locks);
+  if (ok && saved.moveLocks) ok = Array.isArray(saved.moveLocks) && saved.moveLocks.length === saved.moves.length && saved.moveLocks.every(validLocks);
+  S = ok ? saved : freshState();
+  if (!Array.isArray(S.locks) && validLocks(S.locks)) S.locks = Core.cloneLocks(S.locks); else S.locks = Core.cloneLocks(null);
+  if (!Array.isArray(S.moveLocks) || S.moveLocks.length !== S.moves.length) S.moveLocks = S.moves.map(() => Core.cloneLocks(null));
   if (!Array.isArray(S.feedback)) S.feedback = null;
   if (typeof S.hints !== 'number') S.hints = 0;
-  if (!Array.isArray(S.lockPoints)) S.lockPoints = [];
-  if (!Array.isArray(S.locks)) S.locks = [];
-  const match = Core.rowMatches(S.grid, puzzle.words, puzzle.alts);
-  const okLocks = S.locks.length <= Core.MAX_LOCKS && S.locks.every(r => Number.isInteger(r) && r >= 0 && r < 4 && match[r]) && new Set(S.locks).size === S.locks.length;
-  if (!okLocks) { S.locks = []; S.lockPoints = []; }
-  S.easyUsed = !!S.easyUsed;
+  S.lockUsed = !!S.lockUsed || Core.hasLocks(S.locks);
 }
 const say = t => { $('#msg').textContent = t; if (t) setTimeout(() => { if ($('#msg').textContent === t) $('#msg').textContent = ''; }, 2600); };
 const save = () => store.set('state', S);
 
-// ---------- drawing ----------
-// render() draws the player's game. render(grid, true) draws a replay frame: no locks, arrows disabled, saved game untouched.
-function render(grid, replaying) {
+// ---------- the board: built once, then only updated in place ----------
+const E = { board: null, tiles: [[], [], [], []], arrows: {}, lockBtns: {}, field: null };
+function buildBoard() {
+  const b = E.board = $('#board');
+  const mk = (tag, cls, text, row, col) => {
+    const e = document.createElement(tag);
+    e.className = cls; if (text) e.textContent = text;
+    if (row) { e.style.gridRow = String(row); e.style.gridColumn = String(col); }
+    b.appendChild(e); return e;
+  };
+  const arrow = (m, text, row, col, label) => {
+    const a = mk('button', 'arrow', text, row, col);
+    a.setAttribute('aria-label', label); a.onclick = () => doMove(m);
+    E.arrows[m] = a;
+  };
+  const lock = (key, row, col, label) => {
+    const l = mk('button', 'lockbtn', '🔓', row, col);
+    l.setAttribute('aria-label', label); l.setAttribute('title', label); l.onclick = () => toggleLock(key);
+    E.lockBtns[key] = l;
+  };
+  for (let c = 0; c < 4; c++) {
+    lock('c' + c, 1, 3 + c, 'Lock column ' + (c + 1));
+    arrow('c' + c + '-', '▲', 2, 3 + c, 'Slide column ' + (c + 1) + ' up');
+    arrow('c' + c + '+', '▼', 7, 3 + c, 'Slide column ' + (c + 1) + ' down');
+  }
+  for (let r = 0; r < 4; r++) {
+    lock('r' + r, 3 + r, 1, 'Lock row ' + (r + 1));
+    arrow('r' + r + '-', '◀', 3 + r, 2, 'Slide row ' + (r + 1) + ' left');
+    arrow('r' + r + '+', '▶', 3 + r, 7, 'Slide row ' + (r + 1) + ' right');
+  }
+  E.field = mk('div', 'field');
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+    const t = document.createElement('div');
+    t.className = 'tile'; t.dataset.r = String(r); t.dataset.c = String(c);
+    E.field.appendChild(t); E.tiles[r][c] = t;
+  }
+}
+
+// Update every tile, arrow and icon in place. paint(grid, true) draws a replay frame: no locks, nothing tappable.
+function paint(grid, replaying) {
   const rows = Core.rows(grid || S.grid);
-  const locks = replaying ? [] : S.locks;
-  const dis = replaying ? ' disabled' : '';
-  let h = '';
-  h += '<div></div>' + [0, 1, 2, 3].map(c => `<button class="arrow" data-m="c${c}-"${dis} aria-label="Slide column ${c + 1} up">▲</button>`).join('') + '<div></div>';
-  rows.forEach((row, r) => {
-    const locked = locks.includes(r);
-    const rd = replaying || locked ? ' disabled' : '';
-    const state = replaying ? (Core.isSolved(grid, puzzle.words, puzzle.alts) ? 'done' : '') : S.won ? 'done' : locked ? 'locked' : S.feedback ? (S.feedback[r] ? 'ok' : 'no') : '';
-    h += `<button class="arrow" data-m="r${r}-"${rd} aria-label="Slide row ${r + 1} left">◀</button>`;
-    h += row.split('').map((ch, c) => `<div class="tile ${state}" data-r="${r}" data-c="${c}">${ch}</div>`).join('');
-    h += `<button class="arrow" data-m="r${r}+"${rd} aria-label="Slide row ${r + 1} right">▶</button>`;
+  const locks = replaying ? Core.NO_LOCKS : S.locks;
+  const valid = replaying || S.over ? [] : Core.validMoves(locks);
+  for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) {
+    const t = E.tiles[r][c];
+    const done = replaying ? Core.isSolved(grid, puzzle.words, puzzle.alts) : S.won;
+    const state = done ? 'done' : (!replaying && S.feedback) ? (S.feedback[r] ? 'ok' : 'no') : '';
+    t.className = 'tile' + (state ? ' ' + state : '') + (Core.isFrozen(r, c, locks) ? ' locked' : '');
+    t.textContent = rows[r][c];
+  }
+  Object.keys(E.arrows).forEach(m => { E.arrows[m].disabled = !valid.includes(m); });
+  Object.keys(E.lockBtns).forEach(k => {
+    const on = (k[0] === 'r' ? locks.rows : locks.cols).includes(+k[1]);
+    const b = E.lockBtns[k];
+    b.textContent = on ? '🔒' : '🔓';
+    b.className = 'lockbtn' + (on ? ' on' : '');
+    b.disabled = !!replaying || S.over;
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
-  h += '<div></div>' + [0, 1, 2, 3].map(c => `<button class="arrow" data-m="c${c}+"${dis} aria-label="Slide column ${c + 1} down">▼</button>`).join('') + '<div></div>';
-  $('#board').innerHTML = h;
   $('#moves').textContent = S.moves.length;
   $('#par').textContent = puzzle.par;
   $('#checks').textContent = MAX_CHECKS - S.checks;
   $('#words').textContent = S.over ? puzzle.words.join('  ·  ') : '';
-  $('#easyBadge').style.display = settings.easy && !replaying ? 'block' : 'none';
-  $('#undo').disabled = S.over || !canUndo();
-  $('#reset').disabled = S.over || !S.moves.length && !S.locks.length;
+  $('#undo').disabled = S.over || !S.moves.length;
+  $('#reset').disabled = S.over || (!S.moves.length && !Core.hasLocks(S.locks));
   $('#check').disabled = S.over || S.checks >= MAX_CHECKS;
   $('#hint').disabled = S.over;
   $('#giveup').disabled = S.over;
   $('#showpath').style.display = S.over && !replaying ? '' : 'none';
-  if (!replaying) document.querySelectorAll('.arrow[data-m]').forEach(b => b.onclick = () => doMove(b.dataset.m));
 }
-// Moves made before a lock stay put: the lock was built on them. Undo only steps back through moves made since.
-function canUndo() { return S.moves.length > (S.lockPoints.length ? S.lockPoints[S.lockPoints.length - 1] : 0); }
 
-// Distance between two neighbouring tiles, in pixels.
-function cellStep() {
-  const b = $('#board');
-  const t = b.querySelector && b.querySelector('.tile');
-  return t && t.getBoundingClientRect ? t.getBoundingClientRect().width + 5 : 60;
+// ---------- animation ----------
+// Slides are drawn with temporary copies of the tiles, moved with the Web Animations API (transform only, no layout).
+// The real tiles of the line are hidden while the copies move, then shown again already holding the new letters.
+// Copies live inside .field, which clips them, so a letter that wraps round leaves one edge and enters from the other
+// and never passes over an arrow. A line with frozen cells has no clean edge, so its wrapping letter slides straight
+// to its new slot instead.
+let anim = null;
+function finishAnim() { if (anim) { anim.cleanup(); anim = null; } }
+const vec = (kind, v) => kind === 'r' ? { x: v, y: 0 } : { x: 0, y: v };
+function slotEl(kind, i, s) { return kind === 'r' ? E.tiles[i][s] : E.tiles[s][i]; }
+function stepOf(kind) {
+  return kind === 'r' ? E.tiles[0][1].offsetLeft - E.tiles[0][0].offsetLeft : E.tiles[1][0].offsetTop - E.tiles[0][0].offsetTop;
 }
-// The tiles a slide moves: the whole row, or the unlocked tiles of a column.
-function lineTiles(axis, i, locks) {
-  const b = $('#board');
-  if (!b.querySelectorAll) return [];
-  const L = locks || [];
-  const all = Array.from(b.querySelectorAll(axis === 'r' ? `.tile[data-r="${i}"]` : `.tile[data-c="${i}"]`));
-  return axis === 'r' || !L.length ? all : all.filter(t => !L.includes(+t.dataset.r));
-}
-// Play a slide after the new grid is drawn: each tile glides in from the slot it came from, and the tile that
-// wrapped round slides out of one end of the line while its copy slides in from the other. Locked rows are skipped.
-function playSlide(m, oldGrid, locks) {
+function animateMove(m, oldGrid, locks, opts) {
+  opts = opts || {};
   try {
-    const b = $('#board');
-    if (!b.querySelectorAll || typeof requestAnimationFrame !== 'function') return;
-    const L = locks || [], kind = m[0], i = +m[1], dir = m[2] === '+' ? 1 : -1, step = cellStep(), axis = kind === 'r' ? 'X' : 'Y';
-    const slots = kind === 'r' ? [0, 1, 2, 3] : Core.freeRows(L);            // positions the line occupies
-    const tiles = lineTiles(kind, i, L);                                       // in slot order
-    const n = slots.length;
-    const exitK = dir > 0 ? n - 1 : 0;                                         // slot the wrapped letter leaves from
-    const slot = k => slots[k];
-    const oldChar = kind === 'r' ? oldGrid[i * 4 + slot(exitK)] : oldGrid[slot(exitK) * 4 + i];
-    tiles.forEach((t, k) => {
-      let offset;
-      if (dir > 0) offset = k === 0 ? -1 : -(slot(k) - slot(k - 1));
-      else offset = k === n - 1 ? 1 : (slot(k + 1) - slot(k));
-      t.style.transition = 'none'; t.style.transform = `translate${axis}(${offset * step}px)`;
-    });
-    const ghost = document.createElement('div');
-    ghost.className = 'tile ghost';
-    ghost.textContent = oldChar;
-    ghost.style.gridRow = String((kind === 'r' ? i : slot(exitK)) + 2);
-    ghost.style.gridColumn = String((kind === 'r' ? slot(exitK) : i) + 2);
-    ghost.style.transition = 'none';
-    b.appendChild(ghost);
-    requestAnimationFrame(() => requestAnimationFrame(() => {
-      tiles.forEach(t => { t.style.transition = `transform ${SLIDE_MS}ms ease-out`; t.style.transform = ''; });
-      ghost.style.transition = `transform ${SLIDE_MS}ms ease-in, opacity ${SLIDE_MS}ms ease-in`;
-      ghost.style.transform = `translate${axis}(${dir * step}px)`;
-      ghost.style.opacity = '0';
-      setTimeout(() => ghost.remove && ghost.remove(), SLIDE_MS + 60);
-    }));
-  } catch (e) { /* animation is cosmetic; the game state is already correct */ }
+    if (!E.field || typeof document.createElement !== 'function') return;
+    finishAnim();
+    const kind = m[0], i = +m[1], dir = m[2] === '+' ? 1 : -1, slots = Core.lineSlots(m, locks), n = slots.length;
+    if (n < 2) return;
+    const full = n === 4, step = stepOf(kind), unit = vec(kind, dir * step);
+    const off = vec(kind, dir * (opts.offset || 0));
+    const letter = k => kind === 'r' ? oldGrid[i * 4 + slots[k]] : oldGrid[slots[k] * 4 + i];
+    const pos = k => { const t = slotEl(kind, i, slots[k]); return { x: t.offsetLeft, y: t.offsetTop, w: t.offsetWidth, h: t.offsetHeight }; };
+    const clones = [];
+    const add = (ch, from, to) => {
+      const c = document.createElement('div');
+      c.className = 'tile clone'; c.textContent = ch;
+      c.style.left = from.x + 'px'; c.style.top = from.y + 'px'; c.style.width = from.w + 'px'; c.style.height = from.h + 'px';
+      E.field.appendChild(c);
+      clones.push({ el: c, dx: to.x - from.x, dy: to.y - from.y });
+    };
+    for (let k = 0; k < n; k++) {
+      const target = (k + dir + n) % n, wraps = dir > 0 ? k === n - 1 : k === 0;
+      const from = pos(k), to = pos(target);
+      if (full && wraps) {
+        add(letter(k), from, { x: from.x + unit.x, y: from.y + unit.y });                       // leaves by the edge
+        add(letter(k), { x: to.x - unit.x, y: to.y - unit.y, w: to.w, h: to.h }, to);          // enters from the other edge
+      } else add(letter(k), from, to);
+    }
+    const hidden = slots.map(s => slotEl(kind, i, s));
+    hidden.forEach(t => { t.style.visibility = 'hidden'; });
+    const cleanup = () => { clones.forEach(c => c.el.remove()); hidden.forEach(t => { t.style.visibility = ''; }); };
+    anim = { cleanup };
+    const mine = anim;
+    const ms = opts.offset ? Math.max(70, Math.round(SLIDE_MS * (1 - Math.min(1, opts.offset / step)))) : SLIDE_MS;
+    if (!clones[0].el.animate) { cleanup(); anim = null; return; }
+    const runs = clones.map(c => c.el.animate(
+      [{ transform: `translate(${off.x}px, ${off.y}px)` }, { transform: `translate(${c.dx}px, ${c.dy}px)` }],
+      { duration: ms, easing: 'cubic-bezier(.2,.7,.3,1)', fill: 'forwards' }));
+    Promise.all(runs.map(r => r.finished)).then(() => { if (anim === mine) { cleanup(); anim = null; } }, () => { if (anim === mine) { cleanup(); anim = null; } });
+  } catch (e) { finishAnim(); /* animation is cosmetic; the game state is already correct */ }
 }
 
 // ---------- playing ----------
-function clearHint() { if (hintTimer) { clearTimeout(hintTimer); hintTimer = null; } }
+function clearHint() {
+  if (hintTimer) { clearTimeout(hintTimer); hintTimer = null; }
+  Object.keys(E.arrows).forEach(m => E.arrows[m].classList.remove('hint'));
+}
+function lockName(m) { return m[0] === 'r' ? 'Row ' + (+m[1] + 1) : 'Column ' + (+m[1] + 1); }
 function doMove(m, opts) {
   if (S.over) return;
-  if (m[0] === 'r' && S.locks.includes(+m[1])) { say('Row ' + (+m[1] + 1) + ' is locked'); return; }
-  clearHint();
-  const old = S.grid, L = S.locks;
-  S.grid = Core.applyMoveLocked(S.grid, m, L);
-  S.moves.push(m);
+  if (!Core.isValidMove(m, S.locks)) {
+    const locked = (m[0] === 'r' ? S.locks.rows : S.locks.cols).includes(+m[1]);
+    say(locked ? lockName(m) + ' is locked' : 'Too many cells in that line are locked');
+    return;
+  }
+  finishAnim(); clearHint();
+  const old = S.grid, L = Core.cloneLocks(S.locks);
+  S.grid = Core.applyMoveLocked(old, m, L);
+  S.moves.push(m); S.moveLocks.push(L);
   S.feedback = null;
   if (Core.isSolved(S.grid, puzzle.words, puzzle.alts)) finish(true);
-  save(); render();
-  if (!(opts && opts.dragged)) playSlide(m, old, L);
-  if (S.over) showStats();
+  save(); paint(S.grid);
+  animateMove(m, old, L, opts);
+  if (S.over) setTimeout(showStats, 500);
 }
 function undo() {
-  if (S.over || !canUndo()) return;
-  clearHint();
-  const m = Core.invert(S.moves.pop()), old = S.grid, L = S.locks;
-  S.grid = Core.applyMoveLocked(S.grid, m, L);
-  S.feedback = null; save(); render(); playSlide(m, old, L);
+  if (S.over || !S.moves.length) return;
+  finishAnim(); clearHint();
+  const m = Core.invert(S.moves.pop()), L = S.moveLocks.pop(), old = S.grid;   // undone under the locks the move was made with
+  S.grid = Core.applyMoveLocked(old, m, L);
+  S.feedback = null; save(); paint(S.grid); animateMove(m, old, L);
 }
 function reset() {
   if (S.over) return;
-  clearHint();
-  S.grid = puzzle.start; S.moves = []; S.feedback = null; S.locks = []; S.lockPoints = []; save(); render();
+  finishAnim(); clearHint();
+  S.grid = puzzle.start; S.moves = []; S.moveLocks = []; S.locks = Core.cloneLocks(null); S.feedback = null; save(); paint(S.grid);
+}
+function toggleLock(key) {
+  if (S.over) return;
+  finishAnim(); clearHint();
+  const list = key[0] === 'r' ? S.locks.rows : S.locks.cols, i = +key[1], at = list.indexOf(i);
+  if (at >= 0) { list.splice(at, 1); say(lockName(key) + ' unlocked'); }
+  else { list.push(i); list.sort((a, b) => a - b); S.lockUsed = true; say(lockName(key) + ' locked'); }
+  save(); paint(S.grid);
 }
 function check() {
   if (S.over || S.checks >= MAX_CHECKS) return;
@@ -236,39 +292,26 @@ function check() {
   if (S.checks >= MAX_CHECKS) {
     finish(false);
     say(right + ' of 4 rows right. Out of checks.');
-    save(); render();
+    save(); paint(S.grid);
     setTimeout(showStats, 1600);
     return;
   }
-  let note = '';
-  if (settings.easy) {
-    const fresh = Core.lockableRows(S.grid, puzzle.words, puzzle.alts, S.locks);
-    if (fresh.length) {
-      S.locks = S.locks.concat(fresh).sort((a, b) => a - b);
-      S.lockPoints.push(S.moves.length);
-      S.easyUsed = true;
-      note = '. Locked row' + (fresh.length > 1 ? 's ' : ' ') + fresh.map(r => r + 1).join(' and ');
-    } else if (right > S.locks.length) note = '. Two rows is the most that can lock';
-  }
-  say(right + ' of 4 rows spell a hidden word' + note);
-  save(); render();
+  say(right + ' of 4 rows spell a hidden word');
+  save(); paint(S.grid);
 }
 function hint() {
   if (S.over) return;
   const m = Core.hintMove(S.grid, puzzle.words, puzzle.alts, 10, S.locks);
-  if (!m) { say('No short route from here. Press Reset, then Hint.'); return; }
+  if (!m) { say(Core.hasLocks(S.locks) ? 'No short route. A lock may be in the way: try unlocking a line.' : 'No short route from here. Press Reset, then Hint.'); return; }
   S.hints++; save();
   say('Try ' + Core.describeMove(m));
   clearHint();
-  const arrow = document.querySelector('.arrow[data-m="' + m + '"]');
-  if (arrow && arrow.classList) {
-    arrow.classList.add('hint');
-    hintTimer = setTimeout(() => arrow.classList.remove('hint'), 3200);
-  }
+  E.arrows[m].classList.add('hint');
+  hintTimer = setTimeout(() => E.arrows[m].classList.remove('hint'), 3200);
 }
 function giveUp() {
   if (S.over) return;
-  finish(false); save(); render(); showStats();
+  finishAnim(); finish(false); save(); paint(S.grid); showStats();
 }
 function finish(won) {
   S.over = true; S.won = won;
@@ -279,7 +322,7 @@ function showStats() {
   let body = `<h3>Slip stats</h3><p>Played ${s.played} · Won ${s.wins} · Streak ${s.streak} · Best ${s.best}</p>`;
   shareTextValue = '';
   if (S.over) {
-    shareTextValue = Core.shareText(today, S.moves.length, puzzle.par, S.won, SITE_URL, S.hints, S.easyUsed);
+    shareTextValue = Core.shareText(today, S.moves.length, puzzle.par, S.won, SITE_URL, S.hints, S.lockUsed);
     body += '<pre id="sh"></pre>';
   }
   $('#dlgBody').innerHTML = body;
@@ -287,18 +330,6 @@ function showStats() {
   $('#share').style.display = shareTextValue ? '' : 'none';
   $('#dlgPath').style.display = S.over ? '' : 'none';
   $('#dlg').showModal();
-}
-
-// ---------- settings ----------
-function openSettings() { $('#easyToggle').checked = settings.easy; $('#settings').showModal(); }
-function setEasy(on) {
-  settings.easy = !!on;
-  store.set('settings', settings);
-  if (!on && S.locks.length && !S.over) {
-    S.locks = []; S.lockPoints = []; S.feedback = null; save();
-    say('Locks released');
-  }
-  render();
 }
 
 // ---------- shortest path replay ----------
@@ -321,10 +352,11 @@ function replayCaption(next) {
   $('#replayCap').textContent = t;
 }
 function replayGo(k, animate) {
+  finishAnim();
   const n = puzzle.solution.length, prev = R.k;
   R.k = Math.max(0, Math.min(n, k));
-  render(PATH[R.k], true);
-  if (animate && Math.abs(R.k - prev) === 1) playSlide(R.k > prev ? puzzle.solution[prev] : Core.invert(puzzle.solution[R.k]), PATH[prev], []);
+  paint(PATH[R.k], true);
+  if (animate && Math.abs(R.k - prev) === 1) animateMove(R.k > prev ? puzzle.solution[prev] : Core.invert(puzzle.solution[R.k]), PATH[prev], Core.NO_LOCKS);
   replayCaption(null);
   replayButtons();
 }
@@ -333,11 +365,11 @@ function replayTick() {
   const n = puzzle.solution.length;
   if (R.k >= n) { R.playing = false; replayButtons(); return; }
   const m = puzzle.solution[R.k];
-  const arrow = document.querySelector('.arrow[data-m="' + m + '"]');
-  if (arrow && arrow.classList) arrow.classList.add('hint');
+  E.arrows[m].classList.add('hint');
   replayCaption(m);
   replayTimer = setTimeout(() => {
     if (!R || !R.playing) return;
+    E.arrows[m].classList.remove('hint');
     replayGo(R.k + 1, true);
     replayTimer = setTimeout(replayTick, GAP_MS);
   }, PRE_MS);
@@ -345,7 +377,7 @@ function replayTick() {
 function openReplay() {
   if (!S.over) return;
   const dlg = $('#dlg'); if (dlg.close) dlg.close();
-  replayStop();
+  replayStop(); clearHint();
   R = { k: 0, playing: true };
   $('#replay').style.display = '';
   replayGo(0, false);
@@ -353,9 +385,9 @@ function openReplay() {
   replayTimer = setTimeout(replayTick, 900);
 }
 function closeReplay() {
-  replayStop(); R = null;
+  replayStop(); finishAnim(); clearHint(); R = null;
   $('#replay').style.display = 'none';
-  render();
+  paint(S.grid);
 }
 function replayPlayPause() {
   if (!R) return;
@@ -367,65 +399,84 @@ function replayPlayPause() {
 }
 function replayStep(delta) {
   if (!R) return;
-  replayStop(); R.playing = false;
+  replayStop(); clearHint(); R.playing = false;
   replayGo(R.k + delta, true);
   if (R.k < puzzle.solution.length) replayCaption(puzzle.solution[R.k]);
   replayButtons();
 }
 
 // ---------- dragging ----------
-// Press a tile and drag. After a short distance the drag locks to one axis (the larger movement), the row or
-// column lights up, and it follows your finger. Release past a third of a tile to commit one step.
+// Press a tile and drag. After a short distance the drag locks to one axis (the larger movement), the line lights up
+// and follows your finger, and the letter that would wrap round shows entering from the far edge. Release past a third
+// of a tile to slide one step; a shorter drag springs back.
 let drag = null;
-const DRAG_LOCK_PX = 10, COMMIT_FRACTION = 0.35;
-function endDrag() {
-  const b = $('#board');
-  if (b.classList && b.classList.remove) b.classList.remove('dragging');
-  if (drag && drag.axis) lineTiles(drag.axis, drag.axis === 'r' ? drag.r : drag.c, S.locks).forEach(t => {
-    t.classList.remove('line'); t.style.transition = 'transform 120ms ease-out'; t.style.transform = '';
-  });
+function lineOf(kind, i) { return Core.lineSlots(kind + i + '+', S.locks).map(s => slotEl(kind, i, s)); }
+function dragIndex(d) { return d.axis === 'r' ? d.r : d.c; }
+function clearPreview(d) {
+  if (!d || !d.axis) return;
+  E.board.classList.remove('dragging');
+  d.cells.forEach(t => { t.classList.remove('line'); t.style.transform = ''; });
+  if (d.wrap) { d.wrap.el.remove(); d.wrap = null; }
 }
-$('#board').addEventListener('pointerdown', e => {
-  const t = e.target.closest && e.target.closest('.tile');
-  if (!t || S.over) return;
-  drag = { r: +t.dataset.r, c: +t.dataset.c, x: e.clientX, y: e.clientY, axis: null };
-  if (e.pointerId !== undefined && $('#board').setPointerCapture) { try { $('#board').setPointerCapture(e.pointerId); } catch (err) {} }
-});
-$('#board').addEventListener('pointermove', e => {
-  if (!drag) return;
-  const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-  if (!drag.axis) {
-    if (Math.max(Math.abs(dx), Math.abs(dy)) < DRAG_LOCK_PX) return;
-    const axis = Math.abs(dx) >= Math.abs(dy) ? 'r' : 'c';
-    if (axis === 'r' && S.locks.includes(drag.r)) { say('Row ' + (drag.r + 1) + ' is locked'); drag = null; return; }
-    drag.axis = axis;
-    const b = $('#board');
-    if (b.classList && b.classList.add) b.classList.add('dragging');
-    lineTiles(axis, axis === 'r' ? drag.r : drag.c, S.locks).forEach(t => { t.classList.add('line'); t.style.transition = 'none'; });
+function updatePreview(d, delta) {
+  const kind = d.axis, step = stepOf(kind), v = Math.max(-step, Math.min(step, delta)), dir = v > 0 ? 1 : v < 0 ? -1 : 0;
+  const tr = x => kind === 'r' ? `translate(${x}px, 0)` : `translate(0, ${x}px)`;
+  d.cells.forEach(t => { t.style.transform = tr(v); });
+  d.shift = v;
+  if (d.cells.length !== 4) return;
+  if (d.wrap && d.wrap.dir !== dir) { d.wrap.el.remove(); d.wrap = null; }
+  if (dir && !d.wrap) {
+    const src = dir > 0 ? d.cells[3] : d.cells[0], dst = dir > 0 ? d.cells[0] : d.cells[3];
+    const c = document.createElement('div');
+    c.className = 'tile clone'; c.textContent = src.textContent;
+    c.style.left = dst.offsetLeft + 'px'; c.style.top = dst.offsetTop + 'px'; c.style.width = dst.offsetWidth + 'px'; c.style.height = dst.offsetHeight + 'px';
+    E.field.appendChild(c); d.wrap = { el: c, dir };
   }
-  const step = cellStep(), d = Math.max(-step, Math.min(step, drag.axis === 'r' ? dx : dy));
-  lineTiles(drag.axis, drag.axis === 'r' ? drag.r : drag.c, S.locks).forEach(t => { t.style.transform = `translate${drag.axis === 'r' ? 'X' : 'Y'}(${d}px)`; });
-});
-$('#board').addEventListener('pointerup', e => {
-  if (!drag) return;
-  const d = drag, delta = d.axis === 'r' ? e.clientX - d.x : e.clientY - d.y;
-  endDrag(); drag = null;
-  if (!d.axis) return;
-  if (Math.abs(delta) >= cellStep() * COMMIT_FRACTION) doMove(d.axis + (d.axis === 'r' ? d.r : d.c) + (delta > 0 ? '+' : '-'), { dragged: true });
-});
-$('#board').addEventListener('pointercancel', () => { if (drag) { endDrag(); drag = null; } });
+  if (d.wrap) d.wrap.el.style.transform = tr(v - dir * step);
+}
+function bindDrag() {
+  const f = E.field;
+  f.addEventListener('pointerdown', e => {
+    const t = e.target && e.target.closest ? e.target.closest('.tile') : null;
+    if (!t || S.over || t.classList.contains('clone')) return;
+    finishAnim();
+    drag = { r: +t.dataset.r, c: +t.dataset.c, x: e.clientX, y: e.clientY, axis: null, cells: [], wrap: null, shift: 0 };
+    if (e.pointerId !== undefined && f.setPointerCapture) { try { f.setPointerCapture(e.pointerId); } catch (err) {} }
+  });
+  f.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.axis) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < DRAG_LOCK_PX) return;
+      const axis = Math.abs(dx) >= Math.abs(dy) ? 'r' : 'c', i = axis === 'r' ? drag.r : drag.c, m = axis + i + '+';
+      if (!Core.isValidMove(m, S.locks)) { say((axis === 'r' ? 'Row ' : 'Column ') + (i + 1) + ' is locked'); drag = null; return; }
+      drag.axis = axis; drag.cells = lineOf(axis, i);
+      E.board.classList.add('dragging');
+      drag.cells.forEach(t => t.classList.add('line'));
+    }
+    updatePreview(drag, drag.axis === 'r' ? dx : dy);
+  });
+  f.addEventListener('pointerup', e => {
+    if (!drag) return;
+    const d = drag; drag = null;
+    if (!d.axis) return;
+    const delta = d.axis === 'r' ? e.clientX - d.x : e.clientY - d.y, step = stepOf(d.axis), shift = d.shift;
+    clearPreview(d);
+    if (Math.abs(delta) >= step * COMMIT_FRACTION) doMove(d.axis + dragIndex(d) + (delta > 0 ? '+' : '-'), { offset: Math.min(Math.abs(shift), step) });
+    else if (shift && d.cells[0].animate) d.cells.forEach(t => t.animate([{ transform: d.axis === 'r' ? `translate(${shift}px, 0)` : `translate(0, ${shift}px)` }, { transform: 'translate(0, 0)' }], { duration: 100, easing: 'ease-out' }));
+  });
+  f.addEventListener('pointercancel', () => { if (drag) { clearPreview(drag); drag = null; } });
+}
 
 $('#showpath').onclick = openReplay; $('#dlgPath').onclick = openReplay;
 $('#rPlay').onclick = replayPlayPause; $('#rPrev').onclick = () => replayStep(-1); $('#rNext').onclick = () => replayStep(1); $('#rClose').onclick = closeReplay;
 $('#undo').onclick = undo; $('#reset').onclick = reset; $('#check').onclick = check; $('#hint').onclick = hint; $('#giveup').onclick = giveUp;
 $('#statsBtn').onclick = showStats; $('#close').onclick = () => $('#dlg').close();
-$('#settingsBtn').onclick = openSettings; $('#settingsClose').onclick = () => $('#settings').close();
-$('#easyToggle').onchange = () => setEasy($('#easyToggle').checked);
 $('#share').onclick = async () => {
   try { navigator.share ? await navigator.share({ text: shareTextValue }) : await navigator.clipboard.writeText(shareTextValue); say('Shared'); } catch (e) {}
 };
 document.addEventListener('keydown', e => { if (e.key === 'z' && (e.ctrlKey || e.metaKey)) undo(); });
 
-load(); render();
+load(); buildBoard(); bindDrag(); paint(S.grid);
 if ('serviceWorker' in navigator) addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 </script></body></html>
