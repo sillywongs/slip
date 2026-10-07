@@ -13,18 +13,22 @@
 :root{--bg:#121214;--fg:#f2f2f2;--tile:#34343c;--edge:#5a5a66;--ok:#2f7d42;--okedge:#69c27a;--no:#4a3236;--noedge:#a35c63;--accent:#4a6fa5;--lock:#7fb0e8;--cell:min(12vw,58px);--gap:4px}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 body{margin:0;background:var(--bg);color:var(--fg);font:16px system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh}
-header{width:100%;max-width:480px;display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #333}
+header{width:100%;max-width:480px;display:flex;justify-content:space-between;align-items:center;padding:8px 14px;border-bottom:1px solid #333}
 h1{font-size:22px;margin:0;letter-spacing:1px}
-main{width:100%;max-width:480px;padding:10px 14px 30px}
+main{width:100%;max-width:480px;padding:6px 14px 30px}
 .btn{background:#2b2b30;color:var(--fg);border:0;border-radius:8px;padding:10px 14px;font-weight:600;font-size:15px;cursor:pointer}
 .btn:disabled{opacity:.4;cursor:default}
 .btn.primary{background:var(--accent)}
 #msg{min-height:24px;text-align:center;font-weight:600;margin:6px 0}
-.help{max-width:400px;margin:6px auto 10px;text-align:center;color:#d4d4da;line-height:1.4}
+#msg.fatal{color:#ff8d8d;padding:8px;border:1px solid #a35c63;border-radius:8px}
+.help{max-width:400px;margin:14px auto 8px;text-align:center;color:#d4d4da;line-height:1.4}
+.more{max-width:400px;margin:0 auto 6px;color:#c4c4cc;font-size:14px;line-height:1.4}
+.more summary{cursor:pointer;text-align:center;color:#9fb8de;padding:4px}
+.more p{margin:6px 0}
 
 /* The board is a fixed 7x7 grid: lock icons, arrows and the tile field. Nothing here is ever re-created or
-   animated except the tiles inside .field, so the arrows and icons never move. */
-.board{display:grid;grid-template-columns:repeat(7,var(--cell));grid-template-rows:repeat(7,var(--cell));gap:var(--gap);justify-content:center;margin:10px auto;touch-action:none;user-select:none}
+   animated except the tiles inside .field, so the arrows and icons never move. Every placement is explicit. */
+.board{display:grid;grid-template-columns:repeat(7,var(--cell));grid-template-rows:repeat(7,var(--cell));gap:var(--gap);justify-content:center;margin:4px auto 6px;touch-action:none;user-select:none}
 .field{grid-row:3 / 7;grid-column:3 / 7;position:relative;overflow:hidden;display:grid;grid-template-columns:repeat(4,var(--cell));grid-template-rows:repeat(4,var(--cell));gap:var(--gap)}
 .arrow{background:#24242a;color:#9a9aa8;border:0;font-size:22px;border-radius:10px;cursor:pointer;padding:0}
 .arrow:active{background:var(--accent);color:#fff}
@@ -52,7 +56,6 @@ pre{white-space:pre-wrap}
 </style></head><body>
 <header><h1>SLIP</h1><button class="btn" id="statsBtn">Stats</button></header>
 <main>
-  <p class="help" id="help"><b>How to play:</b> slide rows and columns until the four rows spell four hidden words, in any order. Drag a tile along its row or column, or tap an arrow. Letters that slide off one edge come back on the other. Nothing is marked until you press Check. Use all three checks without solving it and the game ends. Tap a 🔓 beside a row or column to lock it so it cannot move. Your result shows whether you used any locks.</p>
   <div class="stats"><div>Moves <b id="moves">0</b></div><div>Par <b id="par">0</b></div><div>Checks left <b id="checks">3</b></div></div>
   <div id="msg"></div>
   <div class="board" id="board"></div>
@@ -74,10 +77,33 @@ pre{white-space:pre-wrap}
     <button class="btn" id="giveup">Give up</button>
     <button class="btn primary" id="showpath" style="display:none">Show shortest path</button>
   </div>
+  <p class="help" id="help">Slide rows and columns until the four rows spell four hidden words, in any order. Press <b>Check</b> when you think they do.</p>
+  <details class="more"><summary>How to play</summary>
+    <p>Drag a tile along its row or column, or tap an arrow. Letters that slide off one edge come back on the other.</p>
+    <p>The game never tells you when the rows are right. When you think they are, press <b>Check</b> to submit. Use all three checks without solving it and the game ends.</p>
+    <p>Tap a 🔓 beside a row or column to lock it so it cannot move. Locked lines also keep their letters in place while you slide the lines that cross them. Your result shows whether you used any locks.</p>
+    <p><b>Hint</b> shows the first move of a shortest solution. When a game ends you can watch the shortest path.</p>
+  </details>
 </main>
 <dialog id="dlg"><div id="dlgBody"></div><div class="actions"><button class="btn" id="share">Share</button><button class="btn" id="dlgPath">Show shortest path</button><button class="btn" id="close">Close</button></div></dialog>
-<script src="core.js"></script><script src="data.js"></script>
 <script>
+// If anything stops the game from starting, say so on screen instead of leaving a blank board.
+(function () {
+  const show = text => { const m = document.getElementById('msg'); if (m) { m.className = 'fatal'; m.textContent = text; } };
+  window.addEventListener('error', e => {
+    if (window.__slipHandled) return;                       // a specific message is already on screen
+    show('Slip could not start: ' + (e.message || 'unknown error') + '. Make sure index.html, core.js and data.js are all uploaded from the same version, then hard-refresh.');
+  });
+  window.__slipShow = text => { window.__slipHandled = true; show(text); };
+})();
+</script>
+<script src="core.js?v=slip-7"></script><script src="data.js?v=slip-7"></script>
+<script>
+if (typeof Core === 'undefined' || Core.VERSION !== 'slip-7' || typeof Data === 'undefined' || !Data.PUZZLES) {
+  window.__slipShow('Slip files do not match: core.js is ' + (typeof Core === 'undefined' ? 'missing' : 'version ' + Core.VERSION) +
+    ' but index.html needs slip-7. Upload index.html, core.js and data.js together, then hard-refresh.');
+  throw new Error('version mismatch');
+}
 const $ = s => document.querySelector(s);
 const SITE_URL = location.origin && location.origin !== 'null' ? location.origin + location.pathname : '';
 const MAX_CHECKS = 3, SLIDE_MS = 170, COMMIT_FRACTION = 0.35, DRAG_LOCK_PX = 10;
@@ -247,6 +273,7 @@ function clearHint() {
   Object.keys(E.arrows).forEach(m => E.arrows[m].classList.remove('hint'));
 }
 function lockName(m) { return m[0] === 'r' ? 'Row ' + (+m[1] + 1) : 'Column ' + (+m[1] + 1); }
+// Moving never ends the game, even when the rows spell the words. The player has to press Check.
 function doMove(m, opts) {
   if (S.over) return;
   if (!Core.isValidMove(m, S.locks)) {
@@ -259,10 +286,8 @@ function doMove(m, opts) {
   S.grid = Core.applyMoveLocked(old, m, L);
   S.moves.push(m); S.moveLocks.push(L);
   S.feedback = null;
-  if (Core.isSolved(S.grid, puzzle.words, puzzle.alts)) finish(true);
   save(); paint(S.grid);
   animateMove(m, old, L, opts);
-  if (S.over) setTimeout(showStats, 500);
 }
 function undo() {
   if (S.over || !S.moves.length) return;
@@ -284,11 +309,21 @@ function toggleLock(key) {
   else { list.push(i); list.sort((a, b) => a - b); S.lockUsed = true; say(lockName(key) + ' locked'); }
   save(); paint(S.grid);
 }
+// Check is the only way to win. It marks the rows, and if all four spell the hidden words the puzzle is solved.
+// A check that does not solve it uses one of the three; using the last one ends the game.
 function check() {
   if (S.over || S.checks >= MAX_CHECKS) return;
+  finishAnim(); clearHint();
   S.checks++;
   S.feedback = Core.rowMatches(S.grid, puzzle.words, puzzle.alts);
   const right = S.feedback.filter(Boolean).length;
+  if (right === 4) {
+    finish(true);
+    say('Solved in ' + S.moves.length + ' moves (par ' + puzzle.par + ')');
+    save(); paint(S.grid);
+    setTimeout(showStats, 900);
+    return;
+  }
   if (S.checks >= MAX_CHECKS) {
     finish(false);
     say(right + ' of 4 rows right. Out of checks.');
@@ -302,7 +337,11 @@ function check() {
 function hint() {
   if (S.over) return;
   const m = Core.hintMove(S.grid, puzzle.words, puzzle.alts, 10, S.locks);
-  if (!m) { say(Core.hasLocks(S.locks) ? 'No short route. A lock may be in the way: try unlocking a line.' : 'No short route from here. Press Reset, then Hint.'); return; }
+  if (!m) {
+    say(Core.isSolved(S.grid, puzzle.words, puzzle.alts) ? 'No move to suggest from here.'
+      : Core.hasLocks(S.locks) ? 'No short route. A lock may be in the way: try unlocking a line.' : 'No short route from here. Press Reset, then Hint.');
+    return;
+  }
   S.hints++; save();
   say('Try ' + Core.describeMove(m));
   clearHint();

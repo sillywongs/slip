@@ -2,6 +2,8 @@
   if (typeof module === 'object' && module.exports) module.exports = factory();
   else root.Core = factory();
 })(typeof self !== 'undefined' ? self : this, function () {
+  // index.html checks this so a mix of old and new files is reported instead of leaving a blank board.
+  const VERSION = 'slip-7';
   const EPOCH = Date.UTC(2026, 0, 1);
 
   // ---- dates and randomness ----
@@ -105,7 +107,7 @@
 
   // ---- winning ----
   // 'alts' maps a target word to other spellings of the same letters that also count (BEAR -> BARE).
-  // Without it, a player who builds a real word we did not list would be marked wrong.
+  // The grid can spell the words without the game ending: the player must press Check to submit it.
   const spellings = (word, alts) => [word].concat((alts && alts[word]) || []);
   function matchedWords(state, words, alts) {
     const left = words.slice();
@@ -217,7 +219,7 @@
     return head + '\n' + (won ? bar + '\n' : '') + (url || '');
   }
 
-  return { ALL_MOVES, NO_LOCKS, dateKey, dayIndex, prevKey, mulberry32, shuffle, pick, rows, slideRow, slideCol, applyMove, applyAll,
+  return { VERSION, ALL_MOVES, NO_LOCKS, dateKey, dayIndex, prevKey, mulberry32, shuffle, pick, rows, slideRow, slideCol, applyMove, applyAll,
     invert, describeMove, pathStates, freeRows, freeCols, isFrozen, hasLocks, cloneLocks, lineSlots, isValidMove, validMoves,
     applyMoveLocked, matchedWords, isSolved, rowMatches, permutations, goalStates, minMoves, hintMove, scramble, updateStats, shareText };
 });

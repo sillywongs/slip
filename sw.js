@@ -1,5 +1,5 @@
-const VERSION = 'slip-v5';
-const FILES = ['./', './index.html', './core.js', './data.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
+const VERSION = 'slip-7';
+const FILES = ['./', './index.html', './core.js?v=slip-7', './data.js?v=slip-7', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener('activate', e => {
   e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== VERSION).map(k => caches.delete(k)))));
